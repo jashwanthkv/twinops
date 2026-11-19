@@ -12,7 +12,7 @@ class DataAccessRule:
     """Detects Data Access components such as ORM models, Repositories, DAOs, and DB sessions."""
 
     _ORM_BASES = {
-        "Base", "DeclarativeBase", "Model", "db.Model", "Document", "AsyncAttrs",
+        "DeclarativeBase", "db.Model", "Document", "AsyncAttrs",
         "CrudRepository", "JpaRepository", "MongoRepository", "AbstractRepository",
     }
     _ENTITY_DECORATORS = {"Entity", "Table", "Repository", "Document", "dataclass"}
@@ -48,14 +48,20 @@ class DataAccessRule:
 
             # 2. Check classes for ORM inheritance or Repository/DAO naming
             for cls in f.classes:
+                # Strictly ignore Pydantic models
+                if any(b.split(".")[-1] == "BaseModel" for b in cls.bases):
+                    continue
+
                 is_orm_model = any(
-                    any(base_name in b for base_name in self._ORM_BASES)
+                    any(
+                        b.split(".")[-1] == base_name and base_name != "BaseModel"
+                        for base_name in self._ORM_BASES
+                    )
                     for b in cls.bases
                 )
                 is_repo_name = (
                     "repository" in cls.name.lower()
                     or "dao" in cls.name.lower()
-                    or "model" in cls.name.lower()
                 )
                 has_repo_dec = any(
                     dec.split(".")[-1] in self._ENTITY_DECORATORS for dec in cls.decorators

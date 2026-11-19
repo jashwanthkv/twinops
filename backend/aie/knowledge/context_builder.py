@@ -150,7 +150,12 @@ class ContextBuilder:
 
             # Try reading from disk if workspace_root is provided
             if self.workspace_root:
-                file_full = (self.workspace_root / norm_path).resolve()
+                p_obj = Path(norm_path)
+                if p_obj.is_absolute():
+                    file_full = p_obj.resolve()
+                else:
+                    file_full = (self.workspace_root / norm_path).resolve()
+
                 if file_full.is_file() and not self._is_secret_filename(file_full.name):
                     try:
                         raw_text = file_full.read_text(encoding="utf-8", errors="ignore")
