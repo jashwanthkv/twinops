@@ -94,7 +94,7 @@ class CallRelationshipBuilder:
                 all_calls.extend(fn.calls)
 
             for call in all_calls:
-                target_comp, confidence, reason = self._resolve_call(
+                target_comp, confidence, reason, rel_type = self._resolve_call(
                     call,
                     source_comp,
                     class_to_comp,
@@ -109,7 +109,7 @@ class CallRelationshipBuilder:
                     pair_key = (
                         source_comp.component_id,
                         target_comp.component_id,
-                        RelationType.CALLS.value,
+                        rel_type.value,
                     )
                     if pair_key in seen_pairs:
                         continue
@@ -119,7 +119,7 @@ class CallRelationshipBuilder:
                         run_id=run_id,
                         source_component_id=source_comp.component_id,
                         target_component_id=target_comp.component_id,
-                        relation_type=RelationType.CALLS,
+                        relation_type=rel_type,
                         confidence=confidence,
                         description=(
                             f"{source_comp.name} calls {target_comp.name} "
@@ -191,43 +191,67 @@ class CallRelationshipBuilder:
         class_to_comp: dict[str, DiscoveredComponent],
         func_to_comp: dict[str, DiscoveredComponent],
         components: list[DiscoveredComponent],
-    ) -> tuple[DiscoveredComponent | None, RelationshipConfidence, str]:
-        """Resolve a CallInfo to a target component with confidence tier."""
+    ) -> tuple[DiscoveredComponent | None, RelationshipConfidence, str, RelationType]:
+        """Resolve a CallInfo to a target component with confidence tier and semantic type."""
         callee = call.callee.strip()
         if not callee:
-            return None, RelationshipConfidence.INFERRED, ""
+            return None, RelationshipConfidence.INFERRED, "", RelationType.DEPENDS_ON
 
         callee_base = callee.split("(")[0].split(".")[-1]
         callee_full = callee.split("(")[0]
+        callee_lower = callee.lower()
+
+        # Determine semantic type from callee pattern
+        def _infer_rel_type(target_comp: DiscoveredComponent) -> RelationType:
+            target_type_val = target_comp.component_type.value if hasattr(target_comp.component_type, "value") else str(target_comp.component_type)
+            source_type = source_comp.component_type.value if hasattr(source_comp.component_type, "value") else str(source_comp.component_type)
+            # Orchestrator→agent = orchestrates
+            if source_type in {"orchestrator"} and target_type_val in {"agent", "service"}:
+                return RelationType.ORCHESTRATES
+            if source_type in {"agent"} and target_type_val in {"agent"}:
+                return RelationType.INVOKES_AGENT
+            # DB read patterns
+            if any(verb in callee_lower for verb in ["fetchone", "fetchall", "select", "get", "find", "query", "read", "load", "similarity_search"]):
+                if target_type_val in {"database", "vector_store", "cache"}:
+                    return RelationType.READS_FROM
+            # DB write patterns
+            if any(verb in callee_lower for verb in ["insert", "update", "delete", "save", "set", "setex", "hset", "add", "upsert", "execute", "commit"]):
+                if target_type_val in {"database", "vector_store", "cache"}:
+                    return RelationType.WRITES_TO
+            # Publish/subscribe
+            if any(verb in callee_lower for verb in ["publish", "emit", "send", "produce"]):
+                return RelationType.PUBLISHES_TO
+            if any(verb in callee_lower for verb in ["subscribe", "consume", "listen"]):
+                return RelationType.SUBSCRIBES_TO
+            # Thread spawn
+            if any(verb in callee_lower for verb in ["thread", "process", "spawn", "start_worker"]):
+                return RelationType.SPAWNS
+            return RelationType.CALLS
 
         # 1. Direct class instantiation or method invocation on known class
         for part in [callee, callee_full, callee_base]:
             if part in class_to_comp:
                 target = class_to_comp[part]
                 if target.component_id != source_comp.component_id:
-                    return target, RelationshipConfidence.CONFIRMED, "Direct class reference"
+                    return target, RelationshipConfidence.CONFIRMED, "Direct class reference", _infer_rel_type(target)
 
         # 2. Direct function call to known function
         for part in [callee, callee_full, callee_base]:
             if part in func_to_comp:
                 target = func_to_comp[part]
                 if target.component_id != source_comp.component_id:
-                    return target, RelationshipConfidence.CONFIRMED, "Direct function call"
+                    return target, RelationshipConfidence.CONFIRMED, "Direct function call", _infer_rel_type(target)
 
         # 3. Architectural call pattern: Service calling repository / DB
-        callee_lower = callee.lower()
-        if any(term in callee_lower for term in ["repo", "repository", "dao", "query", "session", "cursor"]):
+        if any(term in callee_lower for term in ["repo", "repository", "dao", "query", "session", "cursor", "execute", "fetchone", "fetchall"]):
             for comp in components:
                 if comp.component_id == source_comp.component_id:
                     continue
-                if comp.component_type in (
-                    ComponentType.DATABASE,
-                    ComponentType.SERVICE,
-                ) or any("db" in t.lower() or "sql" in t.lower() for t in comp.technologies):
-                    if "repo" in comp.name.lower() or "data" in comp.name.lower() or "db" in comp.name.lower():
-                        return comp, RelationshipConfidence.INFERRED, "Service calling Repository pattern"
+                ct = comp.component_type.value if hasattr(comp.component_type, "value") else str(comp.component_type)
+                if ct in {"database", "data_access"} or any("db" in t.lower() or "sql" in t.lower() for t in comp.technologies):
+                    return comp, RelationshipConfidence.INFERRED, "DB query pattern", _infer_rel_type(comp)
 
-        # 4. Architectural call pattern: Web handler calling Service
+        # 4. Web handler calling Service
         if any(term in callee_lower for term in ["service", "client", "manager", "handler"]):
             for comp in components:
                 if comp.component_id == source_comp.component_id:
@@ -235,7 +259,7 @@ class CallRelationshipBuilder:
                 cname = comp.name.lower()
                 for token in callee_lower.split("."):
                     if token in cname or cname in token:
-                        return comp, RelationshipConfidence.INFERRED, "Web calling Service pattern"
+                        return comp, RelationshipConfidence.INFERRED, "Web calling Service pattern", _infer_rel_type(comp)
 
         # 5. Component name match in callee
         for comp in components:
@@ -243,6 +267,6 @@ class CallRelationshipBuilder:
                 continue
             cname = comp.name.lower().replace("-", "_").replace(" ", "_")
             if cname in callee_lower:
-                return comp, RelationshipConfidence.INFERRED, "Callee identifier matches component name"
+                return comp, RelationshipConfidence.INFERRED, "Callee identifier matches component name", _infer_rel_type(comp)
 
-        return None, RelationshipConfidence.INFERRED, ""
+        return None, RelationshipConfidence.INFERRED, "", RelationType.DEPENDS_ON

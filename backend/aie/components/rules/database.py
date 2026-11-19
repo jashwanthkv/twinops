@@ -26,9 +26,11 @@ class DatabaseRule:
         "asyncpg": "PostgreSQL",
         "mysql": "MySQL",
         "mariadb": "MariaDB",
+        "sqlite3": "SQLite",
         "sqlite": "SQLite",
+        "pymongo": "MongoDB",
+        "motor": "MongoDB",
         "mongodb": "MongoDB",
-        "mongo": "MongoDB",
         "oracle": "Oracle",
         "mssql": "SQL Server",
     }
@@ -45,6 +47,7 @@ class DatabaseRule:
         has_engine_call = False
         has_imports = False
         config_detected = False
+        call_evidence_techs: list[str] = []
 
         for f in codebase_ir.files:
             file_has_db = False
@@ -58,6 +61,8 @@ class DatabaseRule:
                     for kw, name in self._DB_DIALECT_KEYWORDS.items():
                         if kw in fw_lower:
                             technologies_detected.add(name)
+                            if name not in call_evidence_techs:
+                                call_evidence_techs.append(name)
                     evidence_list.append(
                         SourceEvidence(
                             evidence_type=EvidenceType.FILE_CONTENT,
@@ -82,6 +87,8 @@ class DatabaseRule:
                         for kw, name in self._DB_DIALECT_KEYWORDS.items():
                             if kw in callee_lower:
                                 technologies_detected.add(name)
+                                if name not in call_evidence_techs:
+                                    call_evidence_techs.append(name)
                         evidence_list.append(
                             SourceEvidence(
                                 evidence_type=EvidenceType.FILE_CONTENT,
@@ -133,8 +140,9 @@ class DatabaseRule:
             return []
 
         primary_tech = "Database"
-        if technologies_detected:
-            # Pick the most specific detected DB (e.g. PostgreSQL over generic Database)
+        if call_evidence_techs:
+            primary_tech = call_evidence_techs[0]
+        elif technologies_detected:
             primary_tech = sorted(list(technologies_detected))[0]
 
         code_behavior_score = 0.9 if has_engine_call else 0.4

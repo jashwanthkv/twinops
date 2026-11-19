@@ -81,7 +81,6 @@ class RelationshipAnalyzer:
             key = (
                 rel.source_component_id,
                 rel.target_component_id,
-                rel.relation_type.value,
             )
 
             if key not in deduped:

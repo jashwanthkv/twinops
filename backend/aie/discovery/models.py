@@ -48,4 +48,5 @@ class TechnologyProfile(BaseModel):
     entry_points: list[EntryPoint] = Field(default_factory=list)
     primary_language: str | None = None
     primary_framework: str | None = None
+    language_primary_frameworks: dict[str, str] = Field(default_factory=dict)
     technologies: list[TechnologyInfo] = Field(default_factory=list)

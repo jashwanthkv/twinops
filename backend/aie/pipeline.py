@@ -298,6 +298,15 @@ class AIEPipeline:
             else:
                 config_findings = await asyncio.to_thread(extract_config_func, workspace, inventory)
 
+            # Extract operational knobs from source code (tunables, hazards, timeouts)
+            try:
+                operational_knobs = await asyncio.to_thread(
+                    self.config_extractor.extract_operational_knobs, workspace, inventory
+                )
+            except Exception as knob_err:
+                logger.warning("Error extracting operational knobs: %s", knob_err)
+                operational_knobs = []
+
             # ──────────────────────────────────────────────────────────────
             # Step 5: Static AST Analysis (Module 5)
             # ──────────────────────────────────────────────────────────────
@@ -398,6 +407,10 @@ class AIEPipeline:
                 message="Extracting component knowledge via LLM...",
                 stage_index=8,
             )
+
+            # Provide workspace root so LLM gets real source code (not just skeletons)
+            if workspace and hasattr(workspace, "root_path"):
+                self.context_builder.workspace_root = Path(workspace.root_path)
 
             if not skip_llm and components:
                 total_comps = len(components)
@@ -506,6 +519,8 @@ class AIEPipeline:
                 relationships=relationships,
                 profile=profile,
             )
+            if operational_knobs:
+                descriptor["operational_knobs"] = operational_knobs
             capabilities: dict[str, Any] = self.descriptor_generator.infer_capabilities(
                 components=components,
                 app_id=app_id,

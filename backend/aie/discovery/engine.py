@@ -115,10 +115,20 @@ class DiscoveryEngine:
 
         # 4. Determine primary framework
         primary_framework = None
+        language_primary_frameworks: dict[str, str] = {}
         if merged_frameworks:
             # Sort by confidence descending
             sorted_frameworks = sorted(merged_frameworks, key=lambda f: f.confidence, reverse=True)
             primary_framework = sorted_frameworks[0].name
+            for fw in sorted_frameworks:
+                name_lower = fw.name.lower()
+                lang = "python" if any(x in name_lower for x in ["flask", "fastapi", "django", "tornado", "celery", "langgraph", "langchain"]) else (
+                    "javascript" if any(x in name_lower for x in ["react", "vue", "angular", "express", "next", "node"]) else (
+                        "java" if any(x in name_lower for x in ["spring", "micronaut", "quarkus"]) else ""
+                    )
+                )
+                if lang and lang not in language_primary_frameworks:
+                    language_primary_frameworks[lang] = fw.name
 
         # 5. Populate unified technologies list
         all_technologies = (
@@ -145,6 +155,7 @@ class DiscoveryEngine:
             entry_points=merged_entry_points,
             primary_language=primary_language,
             primary_framework=primary_framework,
+            language_primary_frameworks=language_primary_frameworks,
             technologies=all_technologies,
         )
 
@@ -193,6 +204,9 @@ class DiscoveryEngine:
         primary_language = None
         max_count = -1
 
+        NON_CODE = {"markdown", "json", "yaml", "yml", "xml", "toml", "text", "txt", "csv", "svg"}
+        code_candidates = [l for l in lang_counts if l.lower() not in NON_CODE]
+
         for lang, count in lang_counts.most_common():
             pct = round((count / total_files) * 100.0, 2)
             languages.append(
@@ -202,7 +216,9 @@ class DiscoveryEngine:
                     percentage=pct,
                 )
             )
-            if count > max_count:
+            # Prioritize programming languages for primary_language
+            is_code = lang.lower() not in NON_CODE
+            if (is_code or not code_candidates) and count > max_count:
                 max_count = count
                 primary_language = lang
 

@@ -36,6 +36,10 @@ class CacheRule:
 
         for f in codebase_ir.files:
             file_has_cache = False
+            file_has_redis_import = any(
+                any(c in (imp.module or imp.from_module or "").lower() for c in ["redis", "aioredis", "ioredis"])
+                for imp in f.imports
+            )
 
             # 1. Framework patterns (e.g. Redis(), redis.from_url, aioredis)
             for p in f.framework_patterns:
@@ -80,12 +84,12 @@ class CacheRule:
                 if len(parts) >= 2:
                     obj_name = parts[0].lower()
                     method_name = parts[-1]
-                    # Check if object looks like cache/redis and method is an actual cache operation
-                    is_cache_obj = any(
-                        prefix in obj_name
-                        for prefix in ["redis", "cache", "client", "r", "red"]
+                    # Only match if object name explicitly contains "redis" (confirmed import)
+                    # or is a known short alias AND the redis import was found in THIS file
+                    is_explicit_redis = "redis" in obj_name or (
+                        file_has_redis_import and obj_name in {"r", "rc", "red", "cache", "client", "conn"}
                     )
-                    if is_cache_obj and method_name in self._CACHE_CALL_METHODS:
+                    if is_explicit_redis and method_name in self._CACHE_CALL_METHODS:
                         file_has_cache = True
                         actual_calls_found += 1
                         technologies_detected.add("Redis")

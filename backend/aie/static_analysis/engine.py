@@ -103,6 +103,10 @@ class StaticAnalysisEngine:
 
         for r in results:
             if isinstance(r, FileIR):
+                try:
+                    r.file_path = Path(r.file_path).relative_to(root_path).as_posix()
+                except Exception:
+                    r.file_path = r.file_path.replace("\\", "/")
                 parsed_files.append(r)
                 total_classes += len(r.classes)
                 total_functions += len(r.functions)

@@ -295,7 +295,7 @@ class PythonASTParser:
                 # SQLAlchemy
                 if func_name in self._SQLALCHEMY_CALLS:
                     root_mod = import_map.get(root_name, root_name)
-                    if "sqlalchemy" in root_mod.lower() or func_name in self._SQLALCHEMY_CALLS:
+                    if "sqlalchemy" in root_mod.lower():
                         patterns.append(
                             FrameworkPattern(
                                 type="orm",
@@ -309,7 +309,7 @@ class PythonASTParser:
                 # Redis direct constructor
                 if func_name in self._REDIS_CALLS:
                     root_mod = import_map.get(root_name, root_name)
-                    if "redis" in root_mod.lower() or func_name in self._REDIS_CALLS:
+                    if "redis" in root_mod.lower():
                         patterns.append(
                             FrameworkPattern(
                                 type="cache",

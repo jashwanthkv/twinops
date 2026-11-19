@@ -272,6 +272,7 @@ class ConfigExtractor:
             "config.yml",
             "config.yaml",
             "settings.py",
+            "config.py",
         }
         found: list[str] = []
 
@@ -302,3 +303,63 @@ class ConfigExtractor:
         if hasattr(workspace, "root_path"):
             return Path(workspace.root_path)
         return Path(".")
+
+    def extract_operational_knobs(self, workspace: Any, inventory: Any) -> list[dict[str, Any]]:
+        """Extract operational knobs, tunables, and hazard indicators from source code."""
+        import ast
+
+        workspace_root = self._get_workspace_root(workspace)
+        knobs: list[dict[str, Any]] = []
+
+        items = inventory if isinstance(inventory, list) else getattr(inventory, "files", [])
+        py_files: list[str] = []
+        for item in items:
+            p = item.get("path") if isinstance(item, dict) else getattr(item, "path", "")
+            if p and p.endswith(".py") and not any(ign in p.lower() for ign in [".git", "venv", "node_modules"]):
+                py_files.append(p)
+
+        _KNOB_SYMPTOMS = {
+            "ttl": "Cache expiration; session loss if set too low",
+            "session_ttl": "Session timeout; user/agent loses state after this duration",
+            "timeout": "Network/call timeout; may fail on slow external requests",
+            "max_": "Upper bound limit; requests exceeding this will be rejected or truncated",
+            "chunk_size": "Vector store chunking size; affects retrieval granularity and context window",
+            "chunk_overlap": "Chunk overlap tokens; affects cross-boundary search accuracy",
+            "temperature": "LLM generation temperature; controls creativity vs determinism",
+            "max_paper_count": "Maximum papers retrieved per task; memory and API quota impact",
+            "max_runtime": "Maximum task duration before forced termination",
+        }
+
+        for rel_path in py_files:
+            file_path = workspace_root / rel_path
+            if not file_path.is_file() or file_path.stat().st_size > 300_000:
+                continue
+            try:
+                content = file_path.read_text(encoding="utf-8", errors="ignore")
+                tree = ast.parse(content, filename=str(file_path))
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Assign):
+                        for target in node.targets:
+                            if isinstance(target, ast.Name):
+                                name = target.id
+                                if name.isupper() or any(k in name.lower() for k in ["ttl", "timeout", "chunk", "max_", "limit"]):
+                                    val = None
+                                    if isinstance(node.value, ast.Constant):
+                                        val = node.value.value
+                                    elif isinstance(node.value, ast.UnaryOp) and isinstance(node.value.op, ast.USub) and isinstance(node.value.operand, ast.Constant):
+                                        val = -node.value.operand.value
+                                    if val is not None and isinstance(val, (int, float, str)) and len(str(val)) < 100:
+                                        symptom = next(
+                                            (s for k, s in _KNOB_SYMPTOMS.items() if k in name.lower()),
+                                            "Operational configuration parameter"
+                                        )
+                                        knobs.append({
+                                            "knob": name,
+                                            "value": val,
+                                            "file": rel_path.replace("\\", "/"),
+                                            "line": node.lineno,
+                                            "symptom": symptom,
+                                        })
+            except Exception:
+                pass
+        return knobs

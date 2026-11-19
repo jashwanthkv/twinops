@@ -7,9 +7,13 @@ from pathlib import PurePosixPath
 import uuid
 from typing import Any
 
+from aie.components.rules.agent import AgentRule
 from aie.components.rules.cache import CacheRule
 from aie.components.rules.data_access import DataAccessRule
 from aie.components.rules.database import DatabaseRule
+from aie.components.rules.frontend import FrontendRule
+from aie.components.rules.service_layer import ServiceLayerRule
+from aie.components.rules.vector_store import VectorStoreRule
 from aie.components.rules.web_tier import WebTierRule
 from aie.components.scoring import ComponentCandidate, ComponentScorer
 from aie.models import ComponentType, DiscoveredComponent, TechnologyProfile
@@ -42,6 +46,10 @@ class ComponentIdentifier:
         self.scorer = ComponentScorer()
         self.rules = [
             WebTierRule(),
+            AgentRule(),
+            VectorStoreRule(),
+            ServiceLayerRule(),
+            FrontendRule(),
             DataAccessRule(),
             CacheRule(),
             DatabaseRule(),
@@ -80,11 +88,12 @@ class ComponentIdentifier:
                 )
 
         # 3. Deduplicate candidates by (type, technology) or name
-        deduped: dict[tuple[str, str], tuple[ComponentCandidate, float]] = {}
+        deduped: dict[tuple[str, str, str], tuple[ComponentCandidate, float]] = {}
         for cand, score in scored_candidates:
             type_str = str(cand.type)
             tech_str = cand.technology.lower()
-            key = (type_str, tech_str)
+            # Use full component name to allow distinct components of same type
+            key = (type_str, tech_str, cand.name.lower())
 
             if key not in deduped:
                 deduped[key] = (cand, score)
@@ -108,7 +117,7 @@ class ComponentIdentifier:
 
         components: list[DiscoveredComponent] = []
 
-        for (type_str, _), (cand, confidence) in deduped.items():
+        for (type_str, _, _name_prefix), (cand, confidence) in deduped.items():
             comp_type = ComponentType.UNKNOWN
             try:
                 comp_type = ComponentType(cand.type)

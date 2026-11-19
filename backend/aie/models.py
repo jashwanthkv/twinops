@@ -90,6 +90,9 @@ class ComponentType(StrEnum):
     MESSAGE_QUEUE = "message_queue"
     EXTERNAL_API = "external_api"
     BACKGROUND_WORKER = "background_worker"
+    AGENT = "agent"
+    ORCHESTRATOR = "orchestrator"
+    VECTOR_STORE = "vector_store"
     UNKNOWN = "unknown"
 
 
@@ -283,6 +286,7 @@ class TechnologyProfile(BaseModel):
     run_id: str
     primary_language: str | None = None
     primary_framework: str | None = None
+    language_primary_frameworks: dict[str, str] = Field(default_factory=dict)
     languages: list[LanguageInfo] = Field(default_factory=list)
     frameworks: list[FrameworkInfo] = Field(default_factory=list)
     technologies: list[TechnologyInfo] = Field(default_factory=list)
