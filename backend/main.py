@@ -151,7 +151,7 @@ class AnalyzeRepoRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     repo_url: str = Field(
-        default="https://github.com/jashwanthkv/research.git",
+        default=None,
         description="Public or private GitHub repository URL",
         examples=["https://github.com/jashwanthkv/research.git"],
     )
@@ -445,10 +445,16 @@ async def get_analysis_full(analysis_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
-frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
-if os.path.isdir(frontend_dir):
+_frontend_candidates = [
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "frontend")),
+]
+frontend_dir = next((d for d in _frontend_candidates if os.path.isdir(d)), None)
+if frontend_dir:
     app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
     logger.info("Frontend mounted from: %s", frontend_dir)
+else:
+    logger.info("No frontend directory found among candidates: %s", _frontend_candidates)
 
 
 # ---------------------------------------------------------------------------
@@ -554,14 +560,101 @@ async def run_pipeline_cli() -> None:
 
 if __name__ == "__main__":
     import sys
-    if "--server" in sys.argv:
-        uvicorn.run(
-            "main:app",
-            host=settings.app_host,
-            port=settings.app_port,
-            reload=settings.debug,
-            log_level="debug" if settings.debug else "info",
-        )
-    else:
-        import asyncio
+    import asyncio
+
+    args = sys.argv[1:]
+
+    if "--pipeline" in args:
+        # Manual pipeline run: python main.py --pipeline [repo_url] [branch]
         asyncio.run(run_pipeline_cli())
+
+    else:
+        # Default: start ALL services together — AIE server + Gateway
+        # python main.py              → starts both servers
+        # python main.py --aie-only  → starts only AIE server
+        # python main.py --gw-only   → starts only Gateway server
+
+        aie_only = "--aie-only" in args
+        gw_only = "--gw-only" in args
+
+        async def _serve_all() -> None:
+            import os as _os
+            servers = []
+
+            if not gw_only:
+                aie_cfg = uvicorn.Config(
+                    app="main:app",
+                    host=settings.app_host,
+                    port=settings.app_port,
+                    reload=False,
+                    log_level="debug" if settings.debug else "info",
+                )
+                servers.append(uvicorn.Server(aie_cfg))
+                logger.info(
+                    "AIE Server  → http://%s:%d  (docs: /docs)",
+                    settings.app_host, settings.app_port,
+                )
+
+            if not aie_only:
+                from gateway.app import create_gateway_app as _make_gw
+                _gw_port = int(_os.getenv("GATEWAY_PORT", "8001"))
+                gw_cfg = uvicorn.Config(
+                    app=_make_gw(),
+                    host="0.0.0.0",
+                    port=_gw_port,
+                    log_level="info",
+                )
+                servers.append(uvicorn.Server(gw_cfg))
+                logger.info(
+                    "Gateway     → http://0.0.0.0:%d  (docs: /gateway/docs)",
+                    _gw_port,
+                )
+
+            if not servers:
+                logger.error("No servers selected — nothing to start.")
+                return
+
+            # Initialize asynchronous background bus consumers
+            consumers = []
+            try:
+                from storage.consumer import StorageConsumer
+                from ml.consumer_anomaly import AnomalyConsumer
+                from ml.consumer_forecast import ForecastConsumer
+                from twin.consumer import TwinConsumer
+                from llm.consumer import LLMConsumer
+
+                consumers = [
+                    StorageConsumer(),
+                    AnomalyConsumer(),
+                    ForecastConsumer(),
+                    TwinConsumer(),
+                    LLMConsumer(),
+                ]
+            except Exception as exc:
+                logger.error("Failed to initialize background consumers: %s", exc)
+
+            print("\n" + "=" * 70)
+            print("🚀  TWINOPS — FULL PLATFORM STARTING")
+            print("=" * 70)
+            for s in servers:
+                h = s.config.host
+                p = s.config.port
+                print(f"   • {'AIE API  ' if p == settings.app_port else 'Gateway  '} → http://{h}:{p}")
+            print("   • Storage Consumer      → telemetry.events → MongoDB (raw storage)")
+            print("   • Anomaly Consumer      → 18-feature Isolation Forest + Evaluator Gate")
+            print("   • Forecast Consumer     → 6-metric Linear Regression (predicts +15m)")
+            print("   • Digital Twin Consumer → Real-time component health (Redis + MongoDB)")
+            print("   • Master LLM Consumer   → Full AIE Knowledge Injection + Groq Analysis")
+            print("=" * 70 + "\n")
+
+            # Start background consumers as non-blocking tasks so Uvicorn binds immediately
+            consumer_tasks = [asyncio.create_task(c.run()) for c in consumers]
+
+            # Serve Uvicorn servers concurrently
+            try:
+                await asyncio.gather(*(s.serve() for s in servers))
+            finally:
+                for ct in consumer_tasks:
+                    ct.cancel()
+
+        asyncio.run(_serve_all())
