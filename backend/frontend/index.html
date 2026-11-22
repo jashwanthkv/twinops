@@ -1,0 +1,1415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TwinOps — Autonomous Reliability & Digital Twin Console</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              100: '#dcfce7',
+              500: '#22c55e',
+              600: '#16a34a',
+              700: '#15803d',
+              900: '#14532d',
+            },
+            dark: {
+              800: '#1e293b',
+              850: '#172033',
+              900: '#0f172a',
+              950: '#090d16',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    code, pre, .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #0f172a; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #475569; }
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    .animate-pulse-subtle { animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+  </style>
+</head>
+<body class="bg-dark-950 text-slate-100 min-h-screen flex flex-col custom-scrollbar">
+
+  <!-- Top Navigation Bar -->
+  <header class="border-b border-slate-800 bg-dark-900/90 backdrop-blur sticky top-0 z-50 px-6 py-3.5">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-brand-600 to-emerald-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+          <i class="fa-solid fa-microchip text-white text-lg"></i>
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <span class="font-bold text-lg text-white tracking-tight">TwinOps</span>
+            <span class="text-xs uppercase px-2 py-0.5 rounded font-mono font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">Test Lab</span>
+          </div>
+          <p class="text-xs text-slate-400">Application Intelligence &amp; Autonomous Telemetry Pipeline</p>
+        </div>
+      </div>
+
+      <!-- Config & Health Status -->
+      <div class="flex flex-wrap items-center gap-3">
+        <!-- AIE Server Status -->
+        <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-md bg-slate-800/80 border border-slate-700/60 text-xs">
+          <span class="text-slate-400 font-mono">AIE :8000</span>
+          <span id="badge-aie-status" class="w-2 h-2 rounded-full bg-slate-500"></span>
+        </div>
+
+        <!-- Gateway Server Status -->
+        <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-md bg-slate-800/80 border border-slate-700/60 text-xs">
+          <span class="text-slate-400 font-mono">Gateway :8000</span>
+          <span id="badge-gw-status" class="w-2 h-2 rounded-full bg-slate-500"></span>
+        </div>
+
+        <!-- Target App ID Input -->
+        <div class="flex items-center space-x-1.5 px-2 py-1 rounded-md bg-slate-800/80 border border-slate-700/60">
+          <span class="text-xs text-slate-400 font-mono">App:</span>
+          <input type="text" id="target-app-id" value="research" class="bg-dark-900 text-xs text-emerald-400 font-mono px-2 py-0.5 rounded border border-slate-700 focus:outline-none focus:border-emerald-500 w-24 text-center">
+        </div>
+
+        <button onclick="pingServices()" title="Refresh API Status" class="p-1.5 text-slate-400 hover:text-white rounded bg-slate-800 hover:bg-slate-700 text-xs transition">
+          <i class="fa-solid fa-arrows-rotate"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Tabs Switcher -->
+  <div class="border-b border-slate-800/80 bg-dark-900/50 px-6">
+    <div class="max-w-7xl mx-auto flex space-x-4">
+      <button id="tab-btn-aie" onclick="switchTab('aie')" class="py-3 px-4 font-medium text-sm border-b-2 border-emerald-500 text-emerald-400 flex items-center space-x-2 transition">
+        <i class="fa-solid fa-brain"></i>
+        <span>1. AIE Codebase Intelligence</span>
+      </button>
+      <button id="tab-btn-twinops" onclick="switchTab('twinops')" class="py-3 px-4 font-medium text-sm border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2 transition">
+        <i class="fa-solid fa-chart-line"></i>
+        <span>2. TwinOps Live Telemetry &amp; ML/LLM Pipeline</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Content Container -->
+  <main class="max-w-7xl mx-auto w-full px-6 py-6 flex-1">
+
+    <!-- ====================================================================== -->
+    <!-- TAB 1: AIE REPO ANALYSIS -->
+    <!-- ====================================================================== -->
+    <section id="section-aie" class="space-y-6">
+      
+      <!-- Submission Card -->
+      <div class="bg-dark-900 border border-slate-800 rounded-xl p-6 shadow-xl">
+        <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
+          <div>
+            <h2 class="text-base font-semibold text-white flex items-center gap-2">
+              <i class="fa-brands fa-github text-slate-300"></i>
+              <span>Repository Analysis Trigger</span>
+            </h2>
+            <p class="text-xs text-slate-400 mt-0.5">Submit your target Git repository to run the 12-stage Application Intelligence Engine.</p>
+          </div>
+          <span class="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded border border-emerald-500/20">
+            AIE Pipeline v2.0
+          </span>
+        </div>
+
+        <form id="form-aie-analyze" onsubmit="triggerAIEAnalysis(event)" class="space-y-4">
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-4">
+            <div class="md:col-span-6">
+              <label class="block text-xs font-medium text-slate-300 mb-1">Git Repository URL</label>
+              <input type="text" id="aie-repo-url" value="https://github.com/jashwanthkv/research.git" required
+                placeholder="https://github.com/owner/repo.git"
+                class="w-full bg-dark-950 border border-slate-700 rounded-lg px-3.5 py-2 text-sm text-slate-100 font-mono focus:outline-none focus:border-emerald-500 transition">
+            </div>
+            <div class="md:col-span-3">
+              <label class="block text-xs font-medium text-slate-300 mb-1">Branch / Ref</label>
+              <input type="text" id="aie-branch" value="main"
+                class="w-full bg-dark-950 border border-slate-700 rounded-lg px-3.5 py-2 text-sm text-slate-100 font-mono focus:outline-none focus:border-emerald-500 transition">
+            </div>
+            <div class="md:col-span-3">
+              <label class="block text-xs font-medium text-slate-300 mb-1">App ID</label>
+              <input type="text" id="aie-app-id" value="research"
+                class="w-full bg-dark-950 border border-slate-700 rounded-lg px-3.5 py-2 text-sm text-slate-100 font-mono focus:outline-none focus:border-emerald-500 transition">
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-4 pt-2">
+            <div class="flex items-center space-x-2">
+              <input type="checkbox" id="aie-skip-llm" class="rounded bg-dark-950 border-slate-700 text-emerald-500 focus:ring-0">
+              <label for="aie-skip-llm" class="text-xs text-slate-400 select-none">
+                Skip LLM generation (fast heuristic extraction only)
+              </label>
+            </div>
+
+            <div class="flex items-center space-x-3">
+              <button type="button" onclick="fetchExistingAIE()" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition flex items-center space-x-1.5">
+                <i class="fa-solid fa-cloud-arrow-down"></i>
+                <span>Load Last Completed Run</span>
+              </button>
+              <button type="submit" id="btn-start-aie" class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-600/30 transition flex items-center space-x-2">
+                <i class="fa-solid fa-play"></i>
+                <span>Start AIE Analysis</span>
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <!-- Pipeline Progress Display -->
+      <div id="aie-progress-card" class="bg-dark-900 border border-slate-800 rounded-xl p-6 shadow-xl hidden">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <div class="flex items-center space-x-3">
+            <div id="aie-spinner" class="animate-spin text-emerald-400 text-lg">
+              <i class="fa-solid fa-circle-notch"></i>
+            </div>
+            <div>
+              <h3 class="text-sm font-semibold text-white flex items-center gap-2">
+                <span id="aie-run-status-text">Pipeline Running</span>
+                <span id="aie-ws-indicator" class="text-[10px] px-2 py-0.5 rounded font-mono bg-slate-800 text-slate-400 border border-slate-700">WS: Initializing</span>
+              </h3>
+              <p id="aie-current-message" class="text-xs text-slate-400">Cloning repository...</p>
+            </div>
+          </div>
+          <div class="text-right">
+            <span id="aie-percentage" class="text-2xl font-bold font-mono text-emerald-400">0%</span>
+            <div id="aie-run-id-display" class="text-[10px] text-slate-500 font-mono">Run ID: -</div>
+          </div>
+        </div>
+
+        <!-- Big Progress Bar -->
+        <div class="w-full bg-dark-950 rounded-full h-2.5 overflow-hidden border border-slate-800 mb-6">
+          <div id="aie-progress-fill" class="bg-gradient-to-r from-emerald-500 to-teal-400 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+
+        <!-- 12 Stage Visualizer Grid -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5" id="stages-grid">
+          <!-- Stage items populated dynamically via JS -->
+        </div>
+      </div>
+
+      <!-- Analysis Results View -->
+      <div id="aie-results-container" class="space-y-6 hidden">
+        <!-- Metrics Summary Stats -->
+        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+          <div class="bg-dark-900 border border-slate-800 rounded-xl p-4">
+            <div class="text-[11px] text-slate-400 uppercase font-medium">Components</div>
+            <div id="stat-components-count" class="text-2xl font-bold text-white font-mono mt-1">0</div>
+          </div>
+          <div class="bg-dark-900 border border-slate-800 rounded-xl p-4">
+            <div class="text-[11px] text-slate-400 uppercase font-medium">Relationships</div>
+            <div id="stat-relations-count" class="text-2xl font-bold text-teal-400 font-mono mt-1">0</div>
+          </div>
+          <div class="bg-dark-900 border border-slate-800 rounded-xl p-4">
+            <div class="text-[11px] text-slate-400 uppercase font-medium">Graph Nodes</div>
+            <div id="stat-nodes-count" class="text-2xl font-bold text-sky-400 font-mono mt-1">0</div>
+          </div>
+          <div class="bg-dark-900 border border-slate-800 rounded-xl p-4">
+            <div class="text-[11px] text-slate-400 uppercase font-medium">Files Analyzed</div>
+            <div id="stat-files-count" class="text-2xl font-bold text-indigo-400 font-mono mt-1">0</div>
+          </div>
+          <div class="bg-dark-900 border border-slate-800 rounded-xl p-4">
+            <div class="text-[11px] text-slate-400 uppercase font-medium">Language</div>
+            <div id="stat-language" class="text-lg font-bold text-amber-400 truncate mt-1">-</div>
+          </div>
+          <div class="bg-dark-900 border border-slate-800 rounded-xl p-4">
+            <div class="text-[11px] text-slate-400 uppercase font-medium">Framework</div>
+            <div id="stat-framework" class="text-lg font-bold text-purple-400 truncate mt-1">-</div>
+          </div>
+        </div>
+
+        <!-- Discovered Components Details -->
+        <div class="bg-dark-900 border border-slate-800 rounded-xl p-6 shadow-xl">
+          <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
+            <div>
+              <h3 class="text-sm font-semibold text-white flex items-center gap-2">
+                <i class="fa-solid fa-cubes text-emerald-400"></i>
+                <span>Discovered Architecture Components &amp; Knowledge</span>
+              </h3>
+              <p class="text-xs text-slate-400">Identified via evidence-driven AST and module structure parsing</p>
+            </div>
+            <span class="text-xs text-slate-400 font-mono" id="components-header-count">0 components</span>
+          </div>
+
+          <div id="components-list" class="space-y-4">
+            <!-- Component cards populated here -->
+          </div>
+        </div>
+
+        <!-- System Call Graph & Relations -->
+        <div class="bg-dark-900 border border-slate-800 rounded-xl p-6 shadow-xl">
+          <div class="mb-4 pb-3 border-b border-slate-800">
+            <h3 class="text-sm font-semibold text-white flex items-center gap-2">
+              <i class="fa-solid fa-diagram-project text-teal-400"></i>
+              <span>Architecture Call Graph &amp; Dependencies</span>
+            </h3>
+            <p class="text-xs text-slate-400">Resolved interaction edges between components</p>
+          </div>
+          <div id="relationships-container" class="overflow-x-auto">
+            <table class="w-full text-xs text-left">
+              <thead class="text-slate-400 uppercase bg-dark-950/80 font-mono border-b border-slate-800">
+                <tr>
+                  <th class="py-2.5 px-4">Source Component</th>
+                  <th class="py-2.5 px-4">Relation Type</th>
+                  <th class="py-2.5 px-4">Target Component</th>
+                  <th class="py-2.5 px-4">Confidence</th>
+                </tr>
+              </thead>
+              <tbody id="relationships-tbody" class="divide-y divide-slate-800/60 font-mono text-slate-300">
+                <!-- Rows populated here -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ====================================================================== -->
+    <!-- TAB 2: TWINOPS LIVE TELEMETRY & ML/LLM PIPELINE -->
+    <!-- ====================================================================== -->
+    <section id="section-twinops" class="space-y-6 hidden">
+
+      <!-- Gateway App Registration & API Key Card -->
+      <div class="bg-dark-900 border border-slate-800 rounded-xl p-4 shadow-xl">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 rounded-lg bg-teal-500/10 text-teal-400 flex items-center justify-center border border-teal-500/20">
+              <i class="fa-solid fa-key text-sm"></i>
+            </div>
+            <div>
+              <h3 class="text-xs font-semibold text-white">Connector Authentication &amp; Registration</h3>
+              <p class="text-[11px] text-slate-400">Registers app with the Gateway on port :8000</p>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="flex items-center space-x-1.5 bg-dark-950 px-2 py-1 rounded border border-slate-700">
+              <span class="text-[11px] text-slate-400 font-mono">Master Key:</span>
+              <input type="password" id="gw-master-key" value="twinops-gateway-master-key-change-me" class="bg-transparent text-xs text-slate-200 font-mono focus:outline-none w-36">
+            </div>
+
+            <button onclick="registerAppConnector()" class="px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white text-xs font-medium transition flex items-center space-x-1.5">
+              <i class="fa-solid fa-id-badge"></i>
+              <span>Register App</span>
+            </button>
+
+            <div class="flex items-center space-x-1.5 bg-dark-950 px-2 py-1 rounded border border-slate-700">
+              <span class="text-[11px] text-slate-400 font-mono">API Key:</span>
+              <input type="text" id="gw-api-key" placeholder="tsk_..." class="bg-transparent text-xs text-emerald-400 font-mono focus:outline-none w-48">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Telemetry Batch Sender & Presets -->
+      <div class="bg-dark-900 border border-slate-800 rounded-xl p-6 shadow-xl">
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-4 pb-3 border-b border-slate-800">
+          <div>
+            <h2 class="text-base font-semibold text-white flex items-center gap-2">
+              <i class="fa-solid fa-sliders text-emerald-400"></i>
+              <span>Manual Telemetry Metric Injector</span>
+            </h2>
+            <p class="text-xs text-slate-400 mt-0.5">Inject telemetry batch into Gateway :8000 (Simulates Application SDK middleware)</p>
+          </div>
+
+          <!-- Presets -->
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-xs text-slate-400 mr-1">Presets:</span>
+            <button onclick="applyPreset('normal')" class="px-2.5 py-1 rounded bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-600/30 text-xs font-medium transition flex items-center space-x-1">
+              <i class="fa-solid fa-circle-check text-[10px]"></i>
+              <span>Nominal (Healthy)</span>
+            </button>
+            <button onclick="applyPreset('elevated')" class="px-2.5 py-1 rounded bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 border border-amber-600/30 text-xs font-medium transition flex items-center space-x-1">
+              <i class="fa-solid fa-triangle-exclamation text-[10px]"></i>
+              <span>Elevated Load</span>
+            </button>
+            <button onclick="applyPreset('spike')" class="px-2.5 py-1 rounded bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-600/30 text-xs font-medium transition flex items-center space-x-1">
+              <i class="fa-solid fa-radiation text-[10px]"></i>
+              <span>Incident Spike (Anomaly)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 18 Metric Grid -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 mb-5" id="metric-inputs-grid">
+          <!-- 18 Inputs dynamically injected -->
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-800">
+          <div class="flex items-center space-x-3">
+            <button onclick="sendTelemetryBatch()" id="btn-send-telemetry" class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-600/30 transition flex items-center space-x-2">
+              <i class="fa-solid fa-paper-plane"></i>
+              <span>Send Telemetry Batch</span>
+            </button>
+            <button onclick="toggleAutoStream()" id="btn-auto-stream" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition flex items-center space-x-1.5">
+              <i class="fa-solid fa-play text-[10px]"></i>
+              <span id="auto-stream-label">Auto-Stream (Every 3s)</span>
+            </button>
+          </div>
+
+          <div id="telemetry-send-status" class="text-xs font-mono text-slate-400">
+            Ready to send batch.
+          </div>
+        </div>
+      </div>
+
+      <!-- ================================================================== -->
+      <!-- 5-STAGE PIPELINE OBSERVABILITY DASHBOARD -->
+      <!-- ================================================================== -->
+      <div class="space-y-6">
+
+        <!-- Stage Header & Auto-Refresh Toggle -->
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-2">
+            <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-300 font-mono">Live Pipeline Stages</h3>
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 animate-pulse-subtle">
+              AUTO-POLL ACTIVE
+            </span>
+          </div>
+          <div class="text-xs text-slate-400 font-mono">
+            Last polled: <span id="pipeline-last-polled">-</span>
+          </div>
+        </div>
+
+        <!-- STAGE 1 & 2: ISOLATION FOREST + EVALUATOR GATE -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          
+          <!-- Stage 1: Isolation Forest Anomaly Detector -->
+          <div class="bg-dark-900 border border-slate-800 rounded-xl p-5 shadow-xl relative overflow-hidden">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
+              <div class="flex items-center space-x-2">
+                <span class="w-6 h-6 rounded-md bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs font-mono font-bold">1</span>
+                <span class="text-xs font-semibold text-white">Isolation Forest Detector</span>
+              </div>
+              <span id="if-alert-badge" class="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700">WAITING</span>
+            </div>
+
+            <div class="space-y-2 text-xs">
+              <div class="flex justify-between items-center bg-dark-950 p-2 rounded border border-slate-800">
+                <span class="text-slate-400">Anomaly Score:</span>
+                <span id="if-score" class="font-mono font-bold text-slate-200">0.00</span>
+              </div>
+              <div class="flex justify-between items-center bg-dark-950 p-2 rounded border border-slate-800">
+                <span class="text-slate-400">Top Root-Cause Metric:</span>
+                <span id="if-top-metric" class="font-mono text-emerald-400 font-semibold">-</span>
+              </div>
+              <div class="flex justify-between items-center bg-dark-950 p-2 rounded border border-slate-800">
+                <span class="text-slate-400">Detection Timestamp:</span>
+                <span id="if-timestamp" class="font-mono text-slate-400 text-[11px]">-</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Stage 2: Evaluator Gate (SLM: llama-3.1-8b-instant) -->
+          <div class="bg-dark-900 border border-slate-800 rounded-xl p-5 shadow-xl relative overflow-hidden">
+            <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
+              <div class="flex items-center space-x-2">
+                <span class="w-6 h-6 rounded-md bg-purple-500/20 text-purple-400 flex items-center justify-center text-xs font-mono font-bold">2</span>
+                <span class="text-xs font-semibold text-white">Evaluator Gate (SLM Gatekeeper)</span>
+              </div>
+              <span id="eval-verdict-badge" class="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700">WAITING</span>
+            </div>
+
+            <div class="space-y-2 text-xs">
+              <div class="flex justify-between items-center bg-dark-950 p-2 rounded border border-slate-800">
+                <span class="text-slate-400">Evaluator Model:</span>
+                <span class="font-mono text-slate-300">llama-3.1-8b-instant</span>
+              </div>
+              <div class="flex justify-between items-center bg-dark-950 p-2 rounded border border-slate-800">
+                <span class="text-slate-400">Verdict:</span>
+                <span id="eval-verdict-text" class="font-mono font-bold text-slate-400">NORMAL / STANDBY</span>
+              </div>
+              <div class="bg-dark-950 p-2 rounded border border-slate-800">
+                <span class="text-slate-400 block mb-1">Gate Decision:</span>
+                <p id="eval-explanation" class="text-slate-300 text-[11px] leading-relaxed">
+                  Awaiting anomaly event from Isolation Forest to initiate evaluation.
+                </p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- STAGE 3: LINEAR REGRESSION FORECAST (6 Bottleneck Metrics) -->
+        <div class="bg-dark-900 border border-slate-800 rounded-xl p-5 shadow-xl">
+          <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
+            <div class="flex items-center space-x-2">
+              <span class="w-6 h-6 rounded-md bg-amber-500/20 text-amber-400 flex items-center justify-center text-xs font-mono font-bold">3</span>
+              <span class="text-xs font-semibold text-white">Linear Regression Forecast Engine (+15 Min Projection)</span>
+            </div>
+            <span class="text-[11px] font-mono text-slate-400">10-min ZSET Rolling Window</span>
+          </div>
+
+          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3" id="forecast-cards-grid">
+            <!-- 6 cards dynamically populated -->
+          </div>
+        </div>
+
+        <!-- STAGE 4: DIGITAL TWIN STATE & HEALTH -->
+        <div class="bg-dark-900 border border-slate-800 rounded-xl p-5 shadow-xl">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-2 border-b border-slate-800">
+            <div class="flex items-center space-x-2">
+              <span class="w-6 h-6 rounded-md bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs font-mono font-bold">4</span>
+              <span class="text-xs font-semibold text-white">Digital Twin Real-Time State</span>
+            </div>
+            <div class="flex items-center space-x-3">
+              <span class="text-xs text-slate-400 font-mono">Twin Health:</span>
+              <span id="twin-health-badge" class="px-3 py-1 rounded text-xs font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700">UNKNOWN</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+            <div class="bg-dark-950 p-3 rounded-lg border border-slate-800">
+              <div class="text-slate-400 mb-1">Consecutive OK Cycles</div>
+              <div id="twin-consecutive-ok" class="text-xl font-bold font-mono text-emerald-400">0</div>
+            </div>
+            <div class="bg-dark-950 p-3 rounded-lg border border-slate-800">
+              <div class="text-slate-400 mb-1">Last Seen Heartbeat</div>
+              <div id="twin-last-seen" class="text-sm font-mono text-slate-300">-</div>
+            </div>
+            <div class="bg-dark-950 p-3 rounded-lg border border-slate-800">
+              <div class="text-slate-400 mb-1">Active Anomalies Count</div>
+              <div id="twin-anomalies-count" class="text-xl font-bold font-mono text-slate-300">0</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- STAGE 5: MASTER LLM ROOT CAUSE & REMEDIATION (The Master Mind) -->
+        <div class="bg-dark-900 border border-slate-800 rounded-xl p-6 shadow-xl relative overflow-hidden">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-800">
+            <div class="flex items-center space-x-2">
+              <span class="w-6 h-6 rounded-md bg-rose-500/20 text-rose-400 flex items-center justify-center text-xs font-mono font-bold">5</span>
+              <div>
+                <h3 class="text-sm font-semibold text-white">Master LLM Root-Cause Analysis &amp; Remediation</h3>
+                <p class="text-[11px] text-slate-400">Injected with full AIE knowledge graph &amp; live Digital Twin state</p>
+              </div>
+            </div>
+            <div id="llm-incident-id" class="text-xs font-mono text-slate-500">No incident triggered</div>
+          </div>
+
+          <!-- Empty State -->
+          <div id="llm-empty-state" class="py-8 text-center text-slate-500 text-xs">
+            <i class="fa-solid fa-microchip text-2xl mb-2 text-slate-600 block"></i>
+            Master LLM is on standby. When the Evaluator verifies a real anomaly or a forecast predicts a severe degradation, the full context will be assembled and analyzed here.
+          </div>
+
+          <!-- Populated Analysis State -->
+          <div id="llm-analysis-content" class="space-y-4 hidden text-xs">
+            <!-- Root Cause Highlight Box -->
+            <div class="p-4 rounded-lg bg-rose-950/30 border border-rose-800/50">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-[11px] uppercase font-bold text-rose-400 tracking-wider">Root Cause Component</span>
+                <span id="llm-root-component-id" class="font-mono text-rose-300 px-2 py-0.5 rounded bg-rose-900/40 border border-rose-700/50">Unknown</span>
+              </div>
+              <p id="llm-root-summary" class="text-sm text-slate-100 font-medium mt-1 leading-snug">
+                Analysis summary...
+              </p>
+            </div>
+
+            <!-- Impact Radius -->
+            <div class="bg-dark-950 p-3.5 rounded-lg border border-slate-800">
+              <span class="text-slate-400 block mb-1.5 font-medium">Blast Radius / Impacted Components:</span>
+              <div id="llm-impact-radius-list" class="flex flex-wrap gap-2">
+                <!-- Badges -->
+              </div>
+            </div>
+
+            <!-- Technical Explanation -->
+            <div class="bg-dark-950 p-3.5 rounded-lg border border-slate-800">
+              <span class="text-slate-400 block mb-1 font-medium">Technical Deep Dive:</span>
+              <p id="llm-technical-explanation" class="text-slate-300 leading-relaxed font-mono text-[11px] whitespace-pre-wrap"></p>
+            </div>
+
+            <!-- Remediation Actions -->
+            <div class="bg-dark-950 p-3.5 rounded-lg border border-slate-800">
+              <span class="text-slate-400 block mb-2 font-medium">Remediation Steps:</span>
+              <ol id="llm-remediation-list" class="space-y-2 list-decimal list-inside text-slate-200">
+                <!-- Steps -->
+              </ol>
+            </div>
+
+            <!-- Forecast Trajectory -->
+            <div class="bg-dark-950 p-3.5 rounded-lg border border-slate-800">
+              <span class="text-slate-400 block mb-1 font-medium">Trajectory If Unremediated:</span>
+              <p id="llm-forecast-trajectory" class="text-amber-300/90 leading-relaxed font-mono text-[11px]"></p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-slate-800/80 bg-dark-900/60 px-6 py-4 text-xs text-slate-500">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center space-x-2">
+        <span class="text-slate-400">TwinOps Engine</span>
+        <span>&bull;</span>
+        <span>FastAPI + Redis Streams + MongoDB + Isolation Forest + Groq</span>
+      </div>
+      <div>
+        <span>Environment: Testing Lab</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ====================================================================== -->
+  <!-- JAVASCRIPT APPLICATION LOGIC -->
+  <!-- ====================================================================== -->
+  <script>
+    // Config & State
+    const AIE_HOST = window.location.port === "8000" ? window.location.origin : "http://localhost:8000";
+    const GW_HOST = AIE_HOST;
+
+    let activeTab = "aie";
+    let activeAnalysisId = null;
+    let wsClient = null;
+    let pollInterval = null;
+    let autoStreamTimer = null;
+
+    // 12 Pipeline stages definition
+    const AIE_STAGES = [
+      { id: "clone", name: "1. Clone", icon: "fa-download" },
+      { id: "filter", name: "2. Filter", icon: "fa-filter" },
+      { id: "classify", name: "3. Classify", icon: "fa-tags" },
+      { id: "discover", name: "4. Discover", icon: "fa-compass" },
+      { id: "docs", name: "5. Docs", icon: "fa-book" },
+      { id: "ast", name: "6. AST", icon: "fa-code" },
+      { id: "enrich", name: "7. Enrich", icon: "fa-wand-magic-sparkles" },
+      { id: "components", name: "8. Components", icon: "fa-cubes" },
+      { id: "relations", name: "9. Relations", icon: "fa-diagram-project" },
+      { id: "knobs", name: "10. Knobs", icon: "fa-sliders" },
+      { id: "llm", name: "11. LLM Extract", icon: "fa-brain" },
+      { id: "persist", name: "12. Persist", icon: "fa-database" },
+    ];
+
+    // 18 Features for telemetry
+    const TELEMETRY_FEATURES = [
+      { name: "cpu_usage_pct", unit: "%", defaultVal: 34.24, forecast: true },
+      { name: "process_cpu_pct", unit: "%", defaultVal: 23.41, forecast: false },
+      { name: "memory_usage_pct", unit: "%", defaultVal: 50.24, forecast: true },
+      { name: "heap_usage_pct", unit: "%", defaultVal: 43.97, forecast: true },
+      { name: "request_rate_rps", unit: "rps", defaultVal: 66.65, forecast: false },
+      { name: "response_time_mean_ms", unit: "ms", defaultVal: 103.8, forecast: false },
+      { name: "response_time_p95_ms", unit: "ms", defaultVal: 166.73, forecast: true },
+      { name: "error_rate_ratio", unit: "ratio", defaultVal: 0.00235, forecast: false },
+      { name: "active_requests", unit: "cnt", defaultVal: 3, forecast: false },
+      { name: "process_threads", unit: "cnt", defaultVal: 20, forecast: false },
+      { name: "db_pool_active", unit: "cnt", defaultVal: 5, forecast: false },
+      { name: "db_pool_idle", unit: "cnt", defaultVal: 15, forecast: false },
+      { name: "db_pool_pending", unit: "cnt", defaultVal: 1, forecast: true },
+      { name: "db_pool_saturation_ratio", unit: "ratio", defaultVal: 0.25, forecast: false },
+      { name: "gc_pause_ms", unit: "ms", defaultVal: 6.32, forecast: false },
+      { name: "cache_hit_ratio", unit: "ratio", defaultVal: 0.9185, forecast: false },
+      { name: "external_api_latency_ms", unit: "ms", defaultVal: 41.44, forecast: false },
+      { name: "worker_queue_depth", unit: "cnt", defaultVal: 0, forecast: true }
+    ];
+
+    const FORECAST_METRICS = [
+      "cpu_usage_pct", "memory_usage_pct", "heap_usage_pct",
+      "response_time_p95_ms", "db_pool_pending", "worker_queue_depth"
+    ];
+
+    // Presets
+    const PRESETS = {
+      normal: {
+        cpu_usage_pct: 34.24, process_cpu_pct: 23.41, memory_usage_pct: 50.24, heap_usage_pct: 43.97,
+        request_rate_rps: 66.65, response_time_mean_ms: 103.8, response_time_p95_ms: 166.73,
+        error_rate_ratio: 0.00235, active_requests: 3, process_threads: 20, db_pool_active: 5,
+        db_pool_idle: 15, db_pool_pending: 1, db_pool_saturation_ratio: 0.25, gc_pause_ms: 6.32,
+        cache_hit_ratio: 0.9185, external_api_latency_ms: 41.44, worker_queue_depth: 0
+      },
+      elevated: {
+        cpu_usage_pct: 68.5, process_cpu_pct: 55.2, memory_usage_pct: 74.0, heap_usage_pct: 65.5,
+        request_rate_rps: 190.0, response_time_mean_ms: 320.0, response_time_p95_ms: 540.0,
+        error_rate_ratio: 0.015, active_requests: 18, process_threads: 35, db_pool_active: 17,
+        db_pool_idle: 3, db_pool_pending: 4, db_pool_saturation_ratio: 0.85, gc_pause_ms: 18.5,
+        cache_hit_ratio: 0.81, external_api_latency_ms: 95.0, worker_queue_depth: 12
+      },
+      spike: {
+        cpu_usage_pct: 94.2, process_cpu_pct: 88.0, memory_usage_pct: 91.5, heap_usage_pct: 89.2,
+        request_rate_rps: 310.0, response_time_mean_ms: 1850.0, response_time_p95_ms: 3450.0,
+        error_rate_ratio: 0.082, active_requests: 64, process_threads: 75, db_pool_active: 20,
+        db_pool_idle: 0, db_pool_pending: 18, db_pool_saturation_ratio: 1.0, gc_pause_ms: 78.4,
+        cache_hit_ratio: 0.45, external_api_latency_ms: 450.0, worker_queue_depth: 120
+      }
+    };
+
+    // Initialize UI on page load
+    window.addEventListener("DOMContentLoaded", () => {
+      buildStagesGrid();
+      buildMetricsInputGrid();
+      buildForecastCardsGrid();
+
+      // Load cached API key and app ID
+      const cachedAppId = localStorage.getItem("twinops_app_id");
+      if (cachedAppId) {
+        document.getElementById("target-app-id").value = cachedAppId;
+        document.getElementById("aie-app-id").value = cachedAppId;
+      }
+      const cachedKey = localStorage.getItem("twinops_api_key");
+      if (cachedKey) {
+        document.getElementById("gw-api-key").value = cachedKey;
+      }
+
+      pingServices();
+      startTwinOpsPolling();
+    });
+
+    // Tab Switching
+    function switchTab(tab) {
+      activeTab = tab;
+      const aieTab = document.getElementById("tab-btn-aie");
+      const twinTab = document.getElementById("tab-btn-twinops");
+      const aieSec = document.getElementById("section-aie");
+      const twinSec = document.getElementById("section-twinops");
+
+      if (tab === "aie") {
+        aieTab.className = "py-3 px-4 font-medium text-sm border-b-2 border-emerald-500 text-emerald-400 flex items-center space-x-2 transition";
+        twinTab.className = "py-3 px-4 font-medium text-sm border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2 transition";
+        aieSec.classList.remove("hidden");
+        twinSec.classList.add("hidden");
+      } else {
+        twinTab.className = "py-3 px-4 font-medium text-sm border-b-2 border-emerald-500 text-emerald-400 flex items-center space-x-2 transition";
+        aieTab.className = "py-3 px-4 font-medium text-sm border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2 transition";
+        twinSec.classList.remove("hidden");
+        aieSec.classList.add("hidden");
+      }
+    }
+
+    // Ping Backend Services
+    async function pingServices() {
+      // Ping AIE
+      const badgeAie = document.getElementById("badge-aie-status");
+      try {
+        const res = await fetch(`${AIE_HOST}/health`);
+        if (res.ok) {
+          badgeAie.className = "w-2 h-2 rounded-full bg-emerald-400";
+        } else {
+          badgeAie.className = "w-2 h-2 rounded-full bg-amber-400";
+        }
+      } catch (e) {
+        badgeAie.className = "w-2 h-2 rounded-full bg-rose-500";
+      }
+
+      // Ping Gateway
+      const badgeGw = document.getElementById("badge-gw-status");
+      try {
+        const res = await fetch(`${GW_HOST}/gateway/health`);
+        if (res.ok) {
+          badgeGw.className = "w-2 h-2 rounded-full bg-emerald-400";
+        } else {
+          badgeGw.className = "w-2 h-2 rounded-full bg-amber-400";
+        }
+      } catch (e) {
+        badgeGw.className = "w-2 h-2 rounded-full bg-rose-500";
+      }
+    }
+
+    // ========================================================================
+    // TAB 1: AIE ENGINE LOGIC
+    // ========================================================================
+
+    function buildStagesGrid() {
+      const container = document.getElementById("stages-grid");
+      container.innerHTML = AIE_STAGES.map(s => `
+        <div id="stage-card-${s.id}" class="bg-dark-950 border border-slate-800 rounded-lg p-2.5 transition flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-slate-400 text-xs"><i class="fa-solid ${s.icon}"></i></span>
+            <span id="stage-badge-${s.id}" class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-500">PENDING</span>
+          </div>
+          <div class="text-[11px] font-medium text-slate-300 truncate">${s.name}</div>
+        </div>
+      `).join("");
+    }
+
+    function setStageStatus(stageId, status) {
+      const card = document.getElementById(`stage-card-${stageId}`);
+      const badge = document.getElementById(`stage-badge-${stageId}`);
+      if (!card || !badge) return;
+
+      if (status === "running") {
+        card.className = "bg-dark-950 border border-amber-500/50 rounded-lg p-2.5 shadow-lg shadow-amber-500/10 transition";
+        badge.className = "text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse";
+        badge.textContent = "RUNNING";
+      } else if (status === "done" || status === "complete") {
+        card.className = "bg-dark-950 border border-emerald-500/50 rounded-lg p-2.5 transition";
+        badge.className = "text-[9px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+        badge.textContent = "DONE";
+      } else if (status === "failed") {
+        card.className = "bg-dark-950 border border-rose-500/50 rounded-lg p-2.5 transition";
+        badge.className = "text-[9px] font-mono px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30";
+        badge.textContent = "FAILED";
+      } else {
+        card.className = "bg-dark-950 border border-slate-800 rounded-lg p-2.5 transition";
+        badge.className = "text-[9px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-500";
+        badge.textContent = "PENDING";
+      }
+    }
+
+    async function triggerAIEAnalysis(e) {
+      e.preventDefault();
+      const repoUrl = document.getElementById("aie-repo-url").value.trim();
+      const branch = document.getElementById("aie-branch").value.trim();
+      const appId = document.getElementById("aie-app-id").value.trim();
+      const skipLlm = document.getElementById("aie-skip-llm").checked;
+
+      // Update global app ID
+      document.getElementById("target-app-id").value = appId;
+      localStorage.setItem("twinops_app_id", appId);
+
+      const btn = document.getElementById("btn-start-aie");
+      btn.disabled = true;
+      btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i><span>Starting...</span>`;
+
+      // Reset stage visualizer
+      AIE_STAGES.forEach(s => setStageStatus(s.id, "pending"));
+      document.getElementById("aie-progress-card").classList.remove("hidden");
+      document.getElementById("aie-results-container").classList.add("hidden");
+      document.getElementById("aie-progress-fill").style.width = "0%";
+      document.getElementById("aie-percentage").textContent = "0%";
+      document.getElementById("aie-run-status-text").textContent = "Pipeline Running";
+      document.getElementById("aie-current-message").textContent = "Submitting analysis request...";
+
+      try {
+        const res = await fetch(`${AIE_HOST}/analyze`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repo_url: repoUrl,
+            branch: branch,
+            application_id: appId,
+            skip_llm: skipLlm
+          })
+        });
+
+        if (!res.ok) {
+          throw new Error(`Server returned HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        activeAnalysisId = data.analysis_id;
+        document.getElementById("aie-run-id-display").textContent = `Run ID: ${activeAnalysisId.slice(0, 8)}...`;
+        
+        // Connect WebSocket with polling fallback
+        connectAIEWebSocket(activeAnalysisId);
+
+      } catch (err) {
+        alert(`Failed to start AIE Analysis: ${err.message}`);
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fa-solid fa-play"></i><span>Start AIE Analysis</span>`;
+      }
+    }
+
+    function connectAIEWebSocket(analysisId) {
+      if (wsClient) {
+        try { wsClient.close(); } catch (e) {}
+      }
+
+      const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsHost = window.location.port === "8000" ? window.location.host : "localhost:8000";
+      const wsUrl = `${wsProtocol}//${wsHost}/ws/aie/analyses/${analysisId}`;
+      const indicator = document.getElementById("aie-ws-indicator");
+
+      try {
+        wsClient = new WebSocket(wsUrl);
+        indicator.textContent = "WS: Connecting...";
+        indicator.className = "text-[10px] px-2 py-0.5 rounded font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30";
+
+        wsClient.onopen = () => {
+          indicator.textContent = "WS: Live Stream";
+          indicator.className = "text-[10px] px-2 py-0.5 rounded font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+        };
+
+        wsClient.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            handleAIEProgressUpdate(data);
+          } catch (e) {
+            console.error("WS Parse error", e);
+          }
+        };
+
+        wsClient.onerror = () => {
+          indicator.textContent = "WS: Polling Fallback";
+          indicator.className = "text-[10px] px-2 py-0.5 rounded font-mono bg-slate-800 text-slate-400 border border-slate-700";
+          startAIEPolling(analysisId);
+        };
+
+        wsClient.onclose = () => {
+          indicator.textContent = "WS: Closed";
+        };
+      } catch (e) {
+        startAIEPolling(analysisId);
+      }
+    }
+
+    let aiePollTimer = null;
+    function startAIEPolling(analysisId) {
+      if (aiePollTimer) clearInterval(aiePollTimer);
+      aiePollTimer = setInterval(async () => {
+        try {
+          const res = await fetch(`${AIE_HOST}/analyses/${analysisId}/status`);
+          if (res.ok) {
+            const data = await res.json();
+            handleAIEProgressUpdate({
+              step: data.stage,
+              progress: data.percent_complete,
+              message: data.message,
+              status: data.status
+            });
+            if (data.status === "complete" || data.status === "failed") {
+              clearInterval(aiePollTimer);
+            }
+          }
+        } catch (e) {}
+      }, 1500);
+    }
+
+    function handleAIEProgressUpdate(data) {
+      if (data.type === "ping") return;
+
+      const step = (data.step || "").toLowerCase();
+      const progress = Math.min(100, Math.max(0, Math.round(data.progress || 0)));
+      const message = data.message || "";
+      const status = data.status || "";
+
+      document.getElementById("aie-percentage").textContent = `${progress}%`;
+      document.getElementById("aie-progress-fill").style.width = `${progress}%`;
+      document.getElementById("aie-current-message").textContent = message;
+
+      // Update stage card
+      if (step) {
+        setStageStatus(step, "running");
+        // Mark previous stages done
+        const idx = AIE_STAGES.findIndex(s => s.id === step);
+        if (idx > 0) {
+          for (let i = 0; i < idx; i++) {
+            setStageStatus(AIE_STAGES[i].id, "done");
+          }
+        }
+      }
+
+      if (step === "complete" || status === "complete" || progress >= 100) {
+        AIE_STAGES.forEach(s => setStageStatus(s.id, "done"));
+        document.getElementById("aie-run-status-text").textContent = "Analysis Complete ✅";
+        document.getElementById("aie-spinner").innerHTML = `<i class="fa-solid fa-circle-check text-emerald-400"></i>`;
+        document.getElementById("aie-spinner").classList.remove("animate-spin");
+        
+        const btn = document.getElementById("btn-start-aie");
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fa-solid fa-play"></i><span>Start AIE Analysis</span>`;
+
+        // Fetch full results
+        loadAIEFullResults(activeAnalysisId);
+      } else if (step === "failed" || status === "failed") {
+        document.getElementById("aie-run-status-text").textContent = "Analysis Failed ❌";
+        document.getElementById("aie-spinner").innerHTML = `<i class="fa-solid fa-circle-xmark text-rose-500"></i>`;
+        document.getElementById("aie-spinner").classList.remove("animate-spin");
+        
+        const btn = document.getElementById("btn-start-aie");
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fa-solid fa-play"></i><span>Start AIE Analysis</span>`;
+      }
+    }
+
+    async function fetchExistingAIE() {
+      const appId = document.getElementById("aie-app-id").value.trim() || "research";
+      document.getElementById("target-app-id").value = appId;
+      localStorage.setItem("twinops_app_id", appId);
+      await loadAIEFullResults(appId);
+    }
+
+    async function loadAIEFullResults(analysisIdOrAppId) {
+      try {
+        const res = await fetch(`${AIE_HOST}/analyses/${analysisIdOrAppId}/full`);
+        if (!res.ok) {
+          throw new Error(`Failed to load results (${res.status})`);
+        }
+        const data = await res.json();
+        renderAIEOutputs(data);
+      } catch (err) {
+        alert(`Could not load AIE outputs for '${analysisIdOrAppId}': ${err.message}`);
+      }
+    }
+
+    function renderAIEOutputs(data) {
+      const resultsContainer = document.getElementById("aie-results-container");
+      resultsContainer.classList.remove("hidden");
+
+      // Stats
+      const summary = data.summary || {};
+      document.getElementById("stat-components-count").textContent = summary.component_count || (data.components || []).length;
+      document.getElementById("stat-relations-count").textContent = summary.relationship_count || (data.architecture?.relationships || []).length;
+      document.getElementById("stat-nodes-count").textContent = summary.node_count || (data.architecture?.nodes || []).length;
+      document.getElementById("stat-files-count").textContent = summary.file_count || 0;
+      document.getElementById("stat-language").textContent = summary.primary_language || data.languages?.primary_language || "Python";
+      document.getElementById("stat-framework").textContent = summary.primary_framework || data.enrichment_details?.primary_framework || "Flask";
+
+      // Components
+      const comps = data.components || [];
+      document.getElementById("components-header-count").textContent = `${comps.length} components identified`;
+      const compList = document.getElementById("components-list");
+
+      if (comps.length === 0) {
+        compList.innerHTML = `<div class="text-xs text-slate-500 p-4 text-center">No components detected.</div>`;
+      } else {
+        compList.innerHTML = comps.map(c => {
+          const techs = (c.technologies || []).map(t => `
+            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700">${t}</span>
+          `).join(" ");
+
+          const paths = (c.root_paths || []).map(p => `
+            <span class="font-mono text-emerald-400 text-[11px]">${p}</span>
+          `).join(", ") || "root";
+
+          return `
+            <div class="bg-dark-950 border border-slate-800 rounded-lg p-4 space-y-3">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center space-x-2">
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">
+                    ${c.component_type || "Component"}
+                  </span>
+                  <span class="font-semibold text-white text-sm">${c.name}</span>
+                  <span class="text-slate-500 font-mono text-[11px]">(${c.component_id})</span>
+                </div>
+                <div class="flex flex-wrap gap-1">${techs}</div>
+              </div>
+
+              <div class="text-xs text-slate-400 font-mono">
+                <span class="text-slate-500">Root Paths:</span> ${paths}
+              </div>
+
+              <!-- 3-Part Descriptions -->
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs bg-dark-900/60 p-3 rounded-lg border border-slate-800/80">
+                <div>
+                  <span class="text-[10px] uppercase font-bold text-teal-400 block mb-1">What It Is Doing</span>
+                  <p class="text-slate-300 text-[11px] leading-relaxed">${c.what_it_is_doing || c.description || "N/A"}</p>
+                </div>
+                <div>
+                  <span class="text-[10px] uppercase font-bold text-sky-400 block mb-1">How It Is Coded</span>
+                  <p class="text-slate-300 text-[11px] leading-relaxed">${c.how_it_is_coded || "N/A"}</p>
+                </div>
+                <div>
+                  <span class="text-[10px] uppercase font-bold text-amber-400 block mb-1">Diagnostic Guide</span>
+                  <p class="text-slate-300 text-[11px] leading-relaxed">${c.diagnostic_guide || "Examine latency and error rates."}</p>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
+
+      // Relationships Table
+      const rels = data.architecture?.relationships || [];
+      const tbody = document.getElementById("relationships-tbody");
+      if (rels.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-center text-slate-500">No relationships mapped.</td></tr>`;
+      } else {
+        tbody.innerHTML = rels.map(r => `
+          <tr class="hover:bg-slate-800/30 transition">
+            <td class="py-2.5 px-4 font-semibold text-white">${r.source_component_id}</td>
+            <td class="py-2.5 px-4"><span class="px-2 py-0.5 rounded bg-teal-500/10 text-teal-400 border border-teal-500/20">${r.relation_type || "calls"}</span></td>
+            <td class="py-2.5 px-4 text-slate-300">${r.target_component_id}</td>
+            <td class="py-2.5 px-4 text-slate-400">${(r.confidence || 1.0).toFixed(2)}</td>
+          </tr>
+        `).join("");
+      }
+    }
+
+    // ========================================================================
+    // TAB 2: TWINOPS TELEMETRY & ML PIPELINE LOGIC
+    // ========================================================================
+
+    function buildMetricsInputGrid() {
+      const container = document.getElementById("metric-inputs-grid");
+      container.innerHTML = TELEMETRY_FEATURES.map(f => `
+        <div class="bg-dark-950 border ${f.forecast ? 'border-amber-500/30' : 'border-slate-800'} rounded-lg p-2.5">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-[11px] font-mono text-slate-400 truncate" title="${f.name}">${f.name}</span>
+            <span class="text-[10px] font-mono text-slate-500">${f.unit}</span>
+          </div>
+          <input type="number" step="any" id="metric-input-${f.name}" value="${f.defaultVal}"
+            class="w-full bg-dark-900 border border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-100 focus:outline-none focus:border-emerald-500 transition">
+        </div>
+      `).join("");
+    }
+
+    function buildForecastCardsGrid() {
+      const container = document.getElementById("forecast-cards-grid");
+      container.innerHTML = FORECAST_METRICS.map(m => `
+        <div class="bg-dark-950 border border-slate-800 rounded-lg p-3 space-y-1.5" id="forecast-card-${m}">
+          <div class="text-[10px] font-mono text-slate-400 truncate" title="${m}">${m}</div>
+          <div class="flex items-baseline justify-between">
+            <div>
+              <span class="text-[10px] text-slate-500 block">Current</span>
+              <span id="fc-curr-${m}" class="text-sm font-bold font-mono text-slate-200">-</span>
+            </div>
+            <div class="text-right">
+              <span class="text-[10px] text-slate-500 block">+15m Pred</span>
+              <span id="fc-pred-${m}" class="text-sm font-bold font-mono text-teal-400">-</span>
+            </div>
+          </div>
+          <div id="fc-trend-${m}" class="text-[10px] font-mono text-slate-500 text-center pt-1 border-t border-slate-800/80">
+            Awaiting data
+          </div>
+        </div>
+      `).join("");
+    }
+
+    function applyPreset(name) {
+      const values = PRESETS[name];
+      if (!values) return;
+      Object.keys(values).forEach(metric => {
+        const input = document.getElementById(`metric-input-${metric}`);
+        if (input) input.value = values[metric];
+      });
+
+      const statusEl = document.getElementById("telemetry-send-status");
+      statusEl.textContent = `Applied preset: ${name.toUpperCase()}`;
+      statusEl.className = "text-xs font-mono text-amber-400";
+    }
+
+    async function registerAppConnector() {
+      const appId = document.getElementById("target-app-id").value.trim() || "research";
+      const masterKey = document.getElementById("gw-master-key").value.trim();
+
+      try {
+        const res = await fetch(`${GW_HOST}/api/v1/connectors/register`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-TwinOps-Master-Key": masterKey
+          },
+          body: JSON.stringify({
+            application_id: appId,
+            display_name: `${appId} Monitored Service`,
+            environment: "production"
+          })
+        });
+
+        if (res.status === 409) {
+          alert(`Application '${appId}' is already registered with Gateway. Please use the existing API key.`);
+          return;
+        }
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail?.message || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        const apiKey = data.api_key;
+        document.getElementById("gw-api-key").value = apiKey;
+        localStorage.setItem("twinops_api_key", apiKey);
+        alert(`Successfully registered '${appId}'! API key saved.`);
+      } catch (err) {
+        alert(`Registration failed: ${err.message}`);
+      }
+    }
+
+    async function sendTelemetryBatch() {
+      const appId = document.getElementById("target-app-id").value.trim() || "research";
+      const apiKey = document.getElementById("gw-api-key").value.trim();
+      const statusEl = document.getElementById("telemetry-send-status");
+
+      if (!apiKey) {
+        alert("Please register the application or enter an API key (tsk_...) first!");
+        return;
+      }
+
+      // Collect all 18 metrics
+      const metrics = TELEMETRY_FEATURES.map(f => {
+        const valInput = document.getElementById(`metric-input-${f.name}`);
+        const val = valInput ? parseFloat(valInput.value) : f.defaultVal;
+        return {
+          name: f.name,
+          value: isNaN(val) ? 0.0 : val,
+          unit: f.unit,
+          status: "available"
+        };
+      });
+
+      const batch = {
+        schema_version: "1.0",
+        application_id: appId,
+        environment: "production",
+        source: "twinops-test-ui",
+        timestamp: new Date().toISOString(),
+        metrics: metrics
+      };
+
+      try {
+        statusEl.textContent = "Publishing telemetry batch...";
+        statusEl.className = "text-xs font-mono text-slate-400";
+
+        const res = await fetch(`${GW_HOST}/api/v1/telemetry`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-TwinOps-API-Key": apiKey
+          },
+          body: JSON.stringify(batch)
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail?.message || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        statusEl.textContent = `Batch accepted! (event: ${data.event_id?.slice(0, 8)}... at ${new Date().toLocaleTimeString()})`;
+        statusEl.className = "text-xs font-mono text-emerald-400";
+
+        // Trigger immediate poll
+        setTimeout(pollTwinOpsObservability, 300);
+
+      } catch (err) {
+        statusEl.textContent = `Error: ${err.message}`;
+        statusEl.className = "text-xs font-mono text-rose-400";
+      }
+    }
+
+    function toggleAutoStream() {
+      const btn = document.getElementById("btn-auto-stream");
+      const label = document.getElementById("auto-stream-label");
+
+      if (autoStreamTimer) {
+        clearInterval(autoStreamTimer);
+        autoStreamTimer = null;
+        label.textContent = "Auto-Stream (Every 3s)";
+        btn.className = "px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition flex items-center space-x-1.5";
+      } else {
+        sendTelemetryBatch();
+        autoStreamTimer = setInterval(() => {
+          // Add small jitter to inputs
+          TELEMETRY_FEATURES.forEach(f => {
+            const input = document.getElementById(`metric-input-${f.name}`);
+            if (input) {
+              const current = parseFloat(input.value);
+              const jitter = (Math.random() - 0.5) * (current * 0.03);
+              input.value = (current + jitter).toFixed(2);
+            }
+          });
+          sendTelemetryBatch();
+        }, 3000);
+
+        label.textContent = "Streaming Active ⏸";
+        btn.className = "px-3 py-2 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/40 text-emerald-300 text-xs font-medium border border-emerald-500/50 transition flex items-center space-x-1.5";
+      }
+    }
+
+    // ========================================================================
+    // OBSERVABILITY POLLING (STAGES 1 - 5)
+    // ========================================================================
+
+    function startTwinOpsPolling() {
+      if (pollInterval) clearInterval(pollInterval);
+      pollInterval = setInterval(pollTwinOpsObservability, 2000);
+    }
+
+    async function pollTwinOpsObservability() {
+      const appId = document.getElementById("target-app-id").value.trim() || "research";
+      document.getElementById("pipeline-last-polled").textContent = new Date().toLocaleTimeString();
+
+      // Poll Anomalies (Stage 1 & 2)
+      pollAnomalies(appId);
+
+      // Poll Forecasts (Stage 3)
+      pollForecasts(appId);
+
+      // Poll Digital Twin State (Stage 4)
+      pollTwinState(appId);
+
+      // Poll Master LLM Latest Analysis (Stage 5)
+      pollMasterLLM(appId);
+    }
+
+    async function pollAnomalies(appId) {
+      try {
+        const res = await fetch(`${GW_HOST}/api/v1/anomalies/${appId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const anomalies = data.active_anomalies || [];
+
+        const ifAlertBadge = document.getElementById("if-alert-badge");
+        const ifScore = document.getElementById("if-score");
+        const ifTopMetric = document.getElementById("if-top-metric");
+        const ifTimestamp = document.getElementById("if-timestamp");
+
+        const evalBadge = document.getElementById("eval-verdict-badge");
+        const evalVerdictText = document.getElementById("eval-verdict-text");
+        const evalExplanation = document.getElementById("eval-explanation");
+
+        if (anomalies.length > 0) {
+          const latest = anomalies[0];
+          // Stage 1
+          ifAlertBadge.textContent = "ANOMALY DETECTED";
+          ifAlertBadge.className = "px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse";
+          ifScore.textContent = (latest.score || 0).toFixed(4);
+          ifScore.className = "font-mono font-bold text-rose-400";
+          ifTopMetric.textContent = latest.top_metric || latest.metric || "unknown";
+          ifTimestamp.textContent = latest.detected_at || new Date().toLocaleTimeString();
+
+          // Stage 2: Evaluator Verdict
+          const verdict = latest.evaluator_verdict || "PENDING";
+          if (verdict === "REAL") {
+            evalBadge.textContent = "CONFIRMED REAL";
+            evalBadge.className = "px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40";
+            evalVerdictText.textContent = "REAL ANOMALY";
+            evalVerdictText.className = "font-mono font-bold text-rose-400";
+            evalExplanation.textContent = `SLM confirmed anomaly on metric '${latest.top_metric || latest.metric}'. Escalated to Master LLM orchestrator.`;
+          } else if (verdict === "FALSE_POSITIVE") {
+            evalBadge.textContent = "FALSE POSITIVE";
+            evalBadge.className = "px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40";
+            evalVerdictText.textContent = "FALSE POSITIVE FILTERED";
+            evalVerdictText.className = "font-mono font-bold text-amber-300";
+            evalExplanation.textContent = "SLM classified metric deviation as transient noise. Filtered to prevent alert fatigue.";
+          } else {
+            evalBadge.textContent = "EVALUATING";
+            evalBadge.className = "px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40 animate-pulse";
+            evalVerdictText.textContent = "EVALUATION IN FLIGHT";
+            evalVerdictText.className = "font-mono font-bold text-blue-300";
+          }
+        } else {
+          // Normal state
+          ifAlertBadge.textContent = "NOMINAL (NO ANOMALY)";
+          ifAlertBadge.className = "px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+          ifScore.textContent = "0.00";
+          ifScore.className = "font-mono font-bold text-slate-400";
+          ifTopMetric.textContent = "None";
+          
+          evalBadge.textContent = "STANDBY";
+          evalBadge.className = "px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700";
+          evalVerdictText.textContent = "NORMAL / STANDBY";
+          evalVerdictText.className = "font-mono font-bold text-slate-400";
+          evalExplanation.textContent = "System nominal. Awaiting anomaly detection event.";
+        }
+      } catch (e) {}
+    }
+
+    async function pollForecasts(appId) {
+      for (const metric of FORECAST_METRICS) {
+        try {
+          const res = await fetch(`${GW_HOST}/api/v1/forecast/${appId}/${metric}`);
+          if (!res.ok) continue;
+          const data = await res.json();
+
+          const currEl = document.getElementById(`fc-curr-${metric}`);
+          const predEl = document.getElementById(`fc-pred-${metric}`);
+          const trendEl = document.getElementById(`fc-trend-${metric}`);
+
+          if (currEl && data.current_value !== null && data.current_value !== undefined) {
+            currEl.textContent = data.current_value.toFixed(1);
+          }
+          if (predEl && data.predicted_15min !== null && data.predicted_15min !== undefined) {
+            predEl.textContent = data.predicted_15min.toFixed(1);
+            
+            // Compare current vs predicted
+            const delta = data.predicted_15min - (data.current_value || 0);
+            if (delta > 5) {
+              trendEl.innerHTML = `<span class="text-rose-400 font-semibold">↑ Rising (+${delta.toFixed(1)})</span>`;
+            } else if (delta < -5) {
+              trendEl.innerHTML = `<span class="text-emerald-400 font-semibold">↓ Falling (${delta.toFixed(1)})</span>`;
+            } else {
+              trendEl.innerHTML = `<span class="text-slate-400">→ Stable</span>`;
+            }
+          }
+        } catch (e) {}
+      }
+    }
+
+    async function pollTwinState(appId) {
+      try {
+        const res = await fetch(`${GW_HOST}/api/v1/twin/${appId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Health Badge
+        const healthBadge = document.getElementById("twin-health-badge");
+        const health = (data.health || "UNKNOWN").toUpperCase();
+        healthBadge.textContent = health;
+
+        if (health === "HEALTHY") {
+          healthBadge.className = "px-3 py-1 rounded text-xs font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+        } else if (health === "DEGRADED") {
+          healthBadge.className = "px-3 py-1 rounded text-xs font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse";
+        } else if (health === "CRITICAL") {
+          healthBadge.className = "px-3 py-1 rounded text-xs font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/50 animate-pulse";
+        } else {
+          healthBadge.className = "px-3 py-1 rounded text-xs font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700";
+        }
+
+        document.getElementById("twin-consecutive-ok").textContent = data.consecutive_ok || 0;
+        document.getElementById("twin-anomalies-count").textContent = (data.active_anomalies || []).length;
+        if (data.last_seen) {
+          const d = new Date(data.last_seen);
+          document.getElementById("twin-last-seen").textContent = isNaN(d) ? data.last_seen : d.toLocaleTimeString();
+        }
+      } catch (e) {}
+    }
+
+    async function pollMasterLLM(appId) {
+      try {
+        const res = await fetch(`${GW_HOST}/api/v1/analysis/${appId}/latest`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || Object.keys(data).length === 0) return;
+
+        // Populate Master LLM analysis
+        document.getElementById("llm-empty-state").classList.add("hidden");
+        document.getElementById("llm-analysis-content").classList.remove("hidden");
+
+        document.getElementById("llm-incident-id").textContent = `Incident: ${data.incident_id || "Active"}`;
+        document.getElementById("llm-root-component-id").textContent = data.root_cause_component_id || "Unknown Component";
+        document.getElementById("llm-root-summary").textContent = data.root_cause_summary || "Automated analysis completed.";
+        document.getElementById("llm-technical-explanation").textContent = data.technical_explanation || "";
+        document.getElementById("llm-forecast-trajectory").textContent = data.forecast_trajectory || "";
+
+        // Impact radius badges
+        const radiusList = document.getElementById("llm-impact-radius-list");
+        const radiusItems = data.impact_radius || [];
+        if (radiusItems.length === 0) {
+          radiusList.innerHTML = `<span class="text-slate-500 text-xs">Isolated to root component</span>`;
+        } else {
+          radiusList.innerHTML = radiusItems.map(item => `
+            <span class="px-2 py-0.5 rounded text-xs font-mono bg-rose-900/40 text-rose-300 border border-rose-700/50">
+              ${item}
+            </span>
+          `).join("");
+        }
+
+        // Remediation list
+        const remList = document.getElementById("llm-remediation-list");
+        const steps = data.remediation_actions || [];
+        if (steps.length === 0) {
+          remList.innerHTML = `<li class="text-slate-500 text-xs">No specific remediation actions recommended.</li>`;
+        } else {
+          remList.innerHTML = steps.map(s => {
+            const stepDesc = typeof s === "object" ? `${s.type ? `[${s.type}] ` : ''}${s.description || JSON.stringify(s)}` : s;
+            return `<li class="leading-relaxed"><span class="text-slate-200">${stepDesc}</span></li>`;
+          }).join("");
+        }
+
+      } catch (e) {}
+    }
+  </script>
+</body>
+</html>

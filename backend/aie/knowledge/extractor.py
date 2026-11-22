@@ -60,6 +60,10 @@ class GroqClientPool:
             self._index = (self._index + 1) % len(self.clients)
             return self.clients[idx]
 
+    def get_next_client(self) -> tuple[str, Any] | tuple[None, None]:
+        """Convenience alias for get_client()."""
+        return self.get_client()
+
 
 class KnowledgeExtractor:
     """Extracts operational and architectural knowledge for a component via Groq API.
