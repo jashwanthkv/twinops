@@ -27,7 +27,7 @@ import time
 import motor.motor_asyncio
 import redis
 
-from env_loader import get_mongo_database, get_mongo_uri, get_redis_url
+from env_loader import get_mongo_client_kwargs, get_mongo_database, get_mongo_uri, get_redis_url
 from twin.state import ApplicationTwinState
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ class TwinStore:
 
     def __init__(self) -> None:
         self._r = redis.from_url(REDIS_URL, decode_responses=True)
-        self._mongo = motor.motor_asyncio.AsyncIOMotorClient(_MONGO_URI)
+        self._mongo = motor.motor_asyncio.AsyncIOMotorClient(_MONGO_URI, **get_mongo_client_kwargs())
         self._col = self._mongo[_DB_NAME]["twin_snapshots"]
         self._last_snapshot: dict[str, float] = {}
 
@@ -57,12 +57,16 @@ class TwinStore:
         self._r.hset(key, mapping=state.to_redis_dict())
 
     def load_hot(self, app_id: str) -> ApplicationTwinState | None:
-        """Load state from Redis. Returns None if not found."""
+        """Load state from Redis. Returns None if not found or Redis is unavailable."""
         key = _state_key(app_id)
-        raw = self._r.hgetall(key)
-        if not raw:
+        try:
+            raw = self._r.hgetall(key)
+            if not raw:
+                return None
+            return ApplicationTwinState.from_redis_dict(app_id, raw)
+        except Exception as exc:
+            logger.debug("TwinStore.load_hot failed for %s: %s", app_id, exc)
             return None
-        return ApplicationTwinState.from_redis_dict(app_id, raw)
 
     async def maybe_snapshot(self, state: ApplicationTwinState) -> None:
         """Write a MongoDB snapshot if SNAPSHOT_INTERVAL has passed."""

@@ -99,6 +99,7 @@ class AnomalyConsumer:
                 "Anomaly detected app=%s score=%.4f top=%s — sending to evaluator",
                 app_id, result.score, result.top_metric,
             )
+            print(f"[ML Engine] ⚠️ Isolation Forest anomaly detected for '{app_id}' on metric '{result.top_metric}' (score: {result.score:.3f}). Sending to Evaluator Gate...", flush=True)
 
             # Build snapshot for evaluator (top 10 non-zero metrics)
             snapshot = {
@@ -123,6 +124,7 @@ class AnomalyConsumer:
 
             if verdict == "FALSE_POSITIVE":
                 logger.info("Evaluator: FALSE_POSITIVE for %s — %s", app_id, reason)
+                print(f"[Evaluator Gate] 🛡️ False positive rejected for '{app_id}' ({result.top_metric}): {reason}", flush=True)
                 self._bus.ack(STREAM_TELEMETRY, _GROUP, msg_id)
                 return
 
@@ -144,6 +146,7 @@ class AnomalyConsumer:
             }
             self._bus.publish(STREAM_ANOMALY, anomaly_event)
             logger.info("Confirmed anomaly published to %s for app=%s", STREAM_ANOMALY, app_id)
+            print(f"[Evaluator Gate] 🚨 CONFIRMED ANOMALY on '{app_id}' ({result.top_metric})! Verdict: {verdict}. Publishing to bus...", flush=True)
 
         except Exception as exc:
             logger.error("AnomalyConsumer._process failed for msg %s: %s", msg_id, exc)

@@ -123,6 +123,19 @@ try:
 except ImportError as exc:
     logger.warning("Could not import aie.api.websocket: %s", exc)
 
+# Mount Gateway Routers directly on unified port 8000
+try:
+    from gateway.routes.telemetry import router as telemetry_router  # noqa: E402
+    from gateway.routes.connectors import router as connectors_router  # noqa: E402
+    from gateway.routes.read_api import router as read_api_router  # noqa: E402
+
+    app.include_router(telemetry_router)
+    app.include_router(connectors_router)
+    app.include_router(read_api_router)
+    logger.info("Gateway routers mounted successfully on unified port %d", settings.app_port)
+except Exception as exc:
+    logger.warning("Could not mount Gateway routers: %s", exc)
+
 
 # ---------------------------------------------------------------------------
 # Health / root endpoints
@@ -136,8 +149,19 @@ async def health() -> dict:
     return {"status": "ok", **store_summary()}
 
 
+@app.get("/gateway/health", tags=["Health"])
+async def gateway_health() -> dict:
+    from bus.streams import get_bus_client
+    try:
+        bus = get_bus_client()
+        bus.ping()
+        return {"status": "ok", "service": "TwinOps Gateway", "bus": "connected"}
+    except Exception as exc:
+        return {"status": "degraded", "service": "TwinOps Gateway", "bus": str(exc)}
+
+
 async def root() -> dict:
-    return {"service": "TwinOps AIE", "status": "ok", "version": app.version}
+    return {"service": "TwinOps Unified Platform", "status": "ok", "version": app.version}
 
 
 # ---------------------------------------------------------------------------
@@ -578,41 +602,16 @@ if __name__ == "__main__":
         gw_only = "--gw-only" in args
 
         async def _serve_all() -> None:
-            import os as _os
-            servers = []
-
-            if not gw_only:
-                aie_cfg = uvicorn.Config(
-                    app="main:app",
-                    host=settings.app_host,
-                    port=settings.app_port,
-                    reload=False,
-                    log_level="debug" if settings.debug else "info",
-                )
-                servers.append(uvicorn.Server(aie_cfg))
-                logger.info(
-                    "AIE Server  → http://%s:%d  (docs: /docs)",
-                    settings.app_host, settings.app_port,
-                )
-
-            if not aie_only:
-                from gateway.app import create_gateway_app as _make_gw
-                _gw_port = int(_os.getenv("GATEWAY_PORT", "8001"))
-                gw_cfg = uvicorn.Config(
-                    app=_make_gw(),
-                    host="0.0.0.0",
-                    port=_gw_port,
-                    log_level="info",
-                )
-                servers.append(uvicorn.Server(gw_cfg))
-                logger.info(
-                    "Gateway     → http://0.0.0.0:%d  (docs: /gateway/docs)",
-                    _gw_port,
-                )
-
-            if not servers:
-                logger.error("No servers selected — nothing to start.")
-                return
+            # Single unified server on settings.app_port (8000)
+            server_cfg = uvicorn.Config(
+                app="main:app",
+                host=settings.app_host,
+                port=settings.app_port,
+                reload=False,
+                log_level="info",
+                access_log=False,  # Silence 2s polling spam so milestone event logs are clear
+            )
+            server = uvicorn.Server(server_cfg)
 
             # Initialize asynchronous background bus consumers
             consumers = []
@@ -634,25 +633,26 @@ if __name__ == "__main__":
                 logger.error("Failed to initialize background consumers: %s", exc)
 
             print("\n" + "=" * 70)
-            print("🚀  TWINOPS — FULL PLATFORM STARTING")
+            print("🚀  TWINOPS — UNIFIED PLATFORM STARTING (PORT 8000)")
             print("=" * 70)
-            for s in servers:
-                h = s.config.host
-                p = s.config.port
-                print(f"   • {'AIE API  ' if p == settings.app_port else 'Gateway  '} → http://{h}:{p}")
+            print(f"   • Web Dashboard         → http://localhost:{settings.app_port}")
+            print(f"   • AIE Engine            → http://localhost:{settings.app_port}/analyze")
+            print(f"   • Telemetry Gateway     → http://localhost:{settings.app_port}/api/v1/telemetry")
+            print(f"   • Swagger API Docs      → http://localhost:{settings.app_port}/docs")
+            print("   ------------------------------------------------------------------")
             print("   • Storage Consumer      → telemetry.events → MongoDB (raw storage)")
             print("   • Anomaly Consumer      → 18-feature Isolation Forest + Evaluator Gate")
             print("   • Forecast Consumer     → 6-metric Linear Regression (predicts +15m)")
             print("   • Digital Twin Consumer → Real-time component health (Redis + MongoDB)")
             print("   • Master LLM Consumer   → Full AIE Knowledge Injection + Groq Analysis")
-            print("=" * 70 + "\n")
+            print("=" * 70 + "\n", flush=True)
 
             # Start background consumers as non-blocking tasks so Uvicorn binds immediately
             consumer_tasks = [asyncio.create_task(c.run()) for c in consumers]
 
-            # Serve Uvicorn servers concurrently
+            # Serve single unified Uvicorn server
             try:
-                await asyncio.gather(*(s.serve() for s in servers))
+                await server.serve()
             finally:
                 for ct in consumer_tasks:
                     ct.cancel()

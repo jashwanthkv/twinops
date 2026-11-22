@@ -40,7 +40,7 @@ from bus.streams import (
     get_bus_client,
     get_clean_redis_url,
 )
-from env_loader import get_mongo_database, get_mongo_uri, get_redis_url
+from env_loader import get_mongo_client_kwargs, get_mongo_database, get_mongo_uri, get_redis_url
 from llm.analyzer import MasterLLMAnalyzer
 from llm.context_assembler import ContextAssembler
 
@@ -58,7 +58,7 @@ class LLMConsumer:
     def __init__(self) -> None:
         self.bus: BusClient = get_bus_client()
         self.r = redis.from_url(_REDIS_URL, decode_responses=True)
-        self.mongo = motor.motor_asyncio.AsyncIOMotorClient(_MONGO_URI)
+        self.mongo = motor.motor_asyncio.AsyncIOMotorClient(_MONGO_URI, **get_mongo_client_kwargs())
         self.col = self.mongo[_DB_NAME]["analysis_results"]
         self.assembler = ContextAssembler()
         self.analyzer = MasterLLMAnalyzer()
@@ -100,6 +100,7 @@ class LLMConsumer:
         app_id = fields.get("application_id") or fields.get("app_id", "unknown")
         try:
             logger.info("LLMConsumer triggered by confirmed anomaly on app='%s' (metric: %s)", app_id, fields.get("top_metric"))
+            print(f"[Master LLM] 🧠 Triggered by confirmed anomaly on '{app_id}' ({fields.get('top_metric')}). Assembling AIE architecture context...", flush=True)
 
             trigger_payload = {
                 "top_metric": fields.get("top_metric"),
@@ -123,6 +124,7 @@ class LLMConsumer:
 
             # 3. Persist and update
             await self._persist_analysis(app_id, analysis, trigger_type="ANOMALY", trigger_id=msg_id)
+            print(f"[Master LLM] ✅ Analysis complete for '{app_id}'. Root cause: {analysis.get('root_cause_component_id', 'unknown')} | Severity: {analysis.get('severity', 'HIGH')} | Persisted to Twin & MongoDB.", flush=True)
 
         except Exception as exc:
             logger.error("LLMConsumer._process_anomaly failed for msg %s: %s", msg_id, exc)
@@ -134,6 +136,7 @@ class LLMConsumer:
         try:
             escalations = json.loads(fields.get("escalations", "[]"))
             logger.warning("LLMConsumer triggered by forecast degradation on app='%s' (%d metrics)", app_id, len(escalations))
+            print(f"[Master LLM] 🔮 Triggered by forecast degradation on '{app_id}' ({len(escalations)} metrics). Assembling AIE architecture context...", flush=True)
 
             trigger_payload = {
                 "escalations": escalations,
@@ -152,6 +155,7 @@ class LLMConsumer:
 
             # 3. Persist and update
             await self._persist_analysis(app_id, analysis, trigger_type="FORECAST", trigger_id=msg_id)
+            print(f"[Master LLM] ✅ Predictive analysis complete for '{app_id}'. Preventive mitigation persisted.", flush=True)
 
         except Exception as exc:
             logger.error("LLMConsumer._process_forecast failed for msg %s: %s", msg_id, exc)

@@ -121,6 +121,7 @@ async def ingest_telemetry(
         len(batch.metrics),
         msg_id,
     )
+    print(f"[TwinOps Gateway] 📥 Ingested telemetry batch for app '{connector.application_id}' ({len(batch.metrics)} metrics)", flush=True)
     return GatewayAccepted(event_id=event.event_id, batch_id=batch.batch_id)
 
 
@@ -173,6 +174,7 @@ async def ingest_heartbeat(
         )
 
     logger.info("Heartbeat accepted app=%s status=%s", connector.application_id, payload.status)
+    print(f"[TwinOps Gateway] 💓 Heartbeat accepted for app '{connector.application_id}'", flush=True)
     return GatewayAccepted(
         event_id=hb_dict["event_id"],
         batch_id=hb_dict["event_id"],

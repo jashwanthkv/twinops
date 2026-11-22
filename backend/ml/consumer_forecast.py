@@ -154,6 +154,7 @@ class ForecastConsumer:
                         "Forecast escalation: app=%s metric=%s current=%.2f predicted=%.2f",
                         app_id, metric, current_val, predicted,
                     )
+                    print(f"[Forecaster] 📉 Projected degradation for '{app_id}' on metric '{metric}': current={current_val:.2f} -> projected={predicted:.2f} in +15m", flush=True)
 
             if escalations:
                 forecast_event = {

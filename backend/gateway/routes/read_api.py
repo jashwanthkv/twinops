@@ -26,7 +26,7 @@ from fastapi import APIRouter, HTTPException
 import motor.motor_asyncio
 import redis
 
-from env_loader import get_mongo_database, get_mongo_uri, get_redis_url
+from env_loader import get_mongo_client_kwargs, get_mongo_database, get_mongo_uri, get_redis_url
 from ml.forecaster import Forecaster
 from ml.rolling_window import get_window, get_window_values
 from twin.store import TwinStore
@@ -42,14 +42,19 @@ _DB_NAME = get_mongo_database()
 _twin_store = TwinStore()
 _forecaster = Forecaster()
 _r = redis.from_url(_REDIS_URL, decode_responses=True)
-_mongo = motor.motor_asyncio.AsyncIOMotorClient(_MONGO_URI)
+_mongo = motor.motor_asyncio.AsyncIOMotorClient(_MONGO_URI, **get_mongo_client_kwargs())
 _analysis_col = _mongo[_DB_NAME]["analysis_results"]
 
 
 @router.get("/twin/{app_id}", summary="Get live Digital Twin state")
 async def get_twin_state(app_id: str) -> dict[str, Any]:
     """Returns the current real-time health, metric snapshot, and active anomalies for an app."""
-    state = _twin_store.load_hot(app_id)
+    try:
+        state = _twin_store.load_hot(app_id)
+    except Exception as exc:
+        logger.debug("Could not read twin state from Redis for %s: %s", app_id, exc)
+        state = None
+
     if not state:
         raise HTTPException(status_code=404, detail=f"No digital twin state found for '{app_id}'")
 
@@ -82,26 +87,30 @@ async def get_latest_analysis(app_id: str) -> dict[str, Any]:
     """Returns the most recent Master LLM root-cause analysis report for an application."""
     # Try Redis hot cache first (<1ms)
     hot_key = f"twin:analysis:{app_id}:latest"
-    cached = _r.get(hot_key)
-    if cached:
-        try:
+    try:
+        cached = _r.get(hot_key)
+        if cached:
             return json.loads(cached)
-        except Exception:
-            pass
+    except Exception as exc:
+        logger.debug("Redis hot cache missed/unreachable for %s: %s", hot_key, exc)
 
     # Fallback to MongoDB
-    doc = await _analysis_col.find_one(
-        {"application_id": app_id},
-        {"_id": 0},
-        sort=[("created_at", -1)],
-    )
-    if not doc:
-        # Also check app_id field
+    doc = None
+    try:
         doc = await _analysis_col.find_one(
-            {"app_id": app_id},
+            {"application_id": app_id},
             {"_id": 0},
             sort=[("created_at", -1)],
         )
+        if not doc:
+            # Also check app_id field
+            doc = await _analysis_col.find_one(
+                {"app_id": app_id},
+                {"_id": 0},
+                sort=[("created_at", -1)],
+            )
+    except Exception as exc:
+        logger.debug("MongoDB analysis fetch failed for %s: %s", app_id, exc)
 
     if not doc:
         raise HTTPException(status_code=404, detail=f"No analysis reports found for '{app_id}'")
@@ -112,14 +121,22 @@ async def get_latest_analysis(app_id: str) -> dict[str, Any]:
 @router.get("/forecast/{app_id}/{metric}", summary="Get metric forecast")
 async def get_metric_forecast(app_id: str, metric: str) -> dict[str, Any]:
     """Returns the 10-minute historical window and projected value at t+15 min."""
-    window_pairs = get_window(_r, app_id, metric)
-    window_vals = get_window_values(_r, app_id, metric)
+    window_pairs = []
+    window_vals = None
+    try:
+        window_pairs = get_window(_r, app_id, metric) or []
+        window_vals = get_window_values(_r, app_id, metric)
+    except Exception as exc:
+        logger.debug("Redis forecast window fetch failed for %s:%s: %s", app_id, metric, exc)
 
     current_val = window_pairs[-1][1] if window_pairs else None
     predicted_15min = None
 
     if window_vals is not None:
-        predicted_15min = _forecaster.predict(app_id, metric, window_vals)
+        try:
+            predicted_15min = _forecaster.predict(app_id, metric, window_vals)
+        except Exception:
+            predicted_15min = None
 
     return {
         "app_id": app_id,
@@ -134,21 +151,27 @@ async def get_metric_forecast(app_id: str, metric: str) -> dict[str, Any]:
 @router.get("/anomalies/{app_id}", summary="Get active anomalies")
 async def get_active_anomalies(app_id: str) -> dict[str, Any]:
     """Returns active anomalies for an app from the Digital Twin."""
-    state = _twin_store.load_hot(app_id)
     anomalies = []
-    if state:
-        anomalies = [
-            {
-                "metric": a.metric,
-                "score": a.score,
-                "top_metric": a.top_metric,
-                "detected_at": a.detected_at,
-                "evaluator_verdict": a.evaluator_verdict,
-            }
-            for a in state.active_anomalies
-        ]
+    health = "UNKNOWN"
+    try:
+        state = _twin_store.load_hot(app_id)
+        if state:
+            health = state.health
+            anomalies = [
+                {
+                    "metric": a.metric,
+                    "score": a.score,
+                    "top_metric": a.top_metric,
+                    "detected_at": a.detected_at,
+                    "evaluator_verdict": a.evaluator_verdict,
+                }
+                for a in state.active_anomalies
+            ]
+    except Exception as exc:
+        logger.debug("Failed to read anomalies from twin store for %s: %s", app_id, exc)
+
     return {
         "app_id": app_id,
-        "health": state.health if state else "UNKNOWN",
+        "health": health,
         "active_anomalies": anomalies,
     }

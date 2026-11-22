@@ -39,11 +39,20 @@ class MongoDBClient:
             return False
 
         try:
+            kwargs: dict[str, Any] = {
+                "serverSelectionTimeoutMS": 5000,
+                "connectTimeoutMS": 5000,
+            }
+            try:
+                import certifi
+                kwargs["tlsCAFile"] = certifi.where()
+            except Exception:
+                pass
+
             # serverSelectionTimeoutMS prevents hanging when cluster is unreachable
             self._client = AsyncIOMotorClient(
                 self.uri,
-                serverSelectionTimeoutMS=5000,
-                connectTimeoutMS=5000,
+                **kwargs,
             )
             # Test ping
             await self._client.admin.command("ping")

@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 import motor.motor_asyncio
 
 from bus.streams import BusClient, STREAM_TELEMETRY, get_bus_client
-from env_loader import get_mongo_database, get_mongo_uri
+from env_loader import get_mongo_client_kwargs, get_mongo_database, get_mongo_uri
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class StorageConsumer:
 
     def __init__(self) -> None:
         self._bus: BusClient = get_bus_client()
-        self._mongo = motor.motor_asyncio.AsyncIOMotorClient(_MONGO_URI)
+        self._mongo = motor.motor_asyncio.AsyncIOMotorClient(_MONGO_URI, **get_mongo_client_kwargs())
         self._col = self._mongo[_DB_NAME][_COLLECTION]
 
     async def run(self) -> None:

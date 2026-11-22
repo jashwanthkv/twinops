@@ -22,6 +22,20 @@ def get_mongo_database() -> str:
     """Return default MongoDB database name."""
     return os.getenv("MONGODB_DATABASE", "twinops_aie").strip() or "twinops_aie"
 
+def get_mongo_client_kwargs() -> dict:
+    """Return common Motor/PyMongo client kwargs including certifi CA bundle."""
+    kwargs = {
+        "serverSelectionTimeoutMS": 5000,
+        "connectTimeoutMS": 5000,
+    }
+    try:
+        import certifi
+        kwargs["tlsCAFile"] = certifi.where()
+    except Exception:
+        pass
+    return kwargs
+
+
 def get_redis_url() -> str:
     """Return a valid redis:// connection URL, ignoring invalid schemes."""
     url = os.getenv("REDIS_URL", "").strip()

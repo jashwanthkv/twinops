@@ -233,14 +233,27 @@ async def require_connector(
         )
 
     # Look up by key hash
-    app_id = registry.get_app_id_for_key(x_twinops_api_key)
+    try:
+        app_id = registry.get_app_id_for_key(x_twinops_api_key)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "REDIS_UNAVAILABLE", "message": "Redis cache is offline; please start Redis"},
+        )
+
     if not app_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "UNKNOWN_API_KEY", "message": "API key not recognised"},
         )
 
-    record = registry.get_by_app_id(app_id)
+    try:
+        record = registry.get_by_app_id(app_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "REDIS_UNAVAILABLE", "message": "Redis cache is offline; please start Redis"},
+        )
     if not record:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

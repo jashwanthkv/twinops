@@ -150,6 +150,8 @@ class AIEPipeline:
         }
         await self.event_bus.publish(run.run_id, event_payload)
         logger.info("[%s] %s (%s%%): %s", run.run_id, step, progress, message)
+        stage_str = f"Stage {stage_index}/{total_stages}" if stage_index > 0 else step
+        print(f"  [AIE] 🚀 {stage_str} ({int(progress)}%): {message}", flush=True)
 
     async def _update(self, run: AnalysisRun, step: str, progress: int, message: str = "") -> None:
         """Compatibility alias for _update_status."""
@@ -160,10 +162,12 @@ class AIEPipeline:
         from aie.utils import extract_project_from_url
 
         owner, project_name = extract_project_from_url(request.repo_url)
-        run_id = str(uuid.uuid4())
+        run_id = getattr(request, "run_id", None) or str(uuid.uuid4())
         app_id = getattr(request, "application_id", None) or project_name or run_id
         branch = getattr(request, "branch", None) or getattr(request, "repo_ref", "HEAD")
         now = datetime.now(tz=timezone.utc)
+
+        print(f"\n[AIE] 📥 Starting Analysis for: {request.repo_url} (App: '{app_id}', Branch: '{branch}', Run ID: {run_id[:8]}...)", flush=True)
 
         run = AnalysisRun(
             run_id=run_id,
