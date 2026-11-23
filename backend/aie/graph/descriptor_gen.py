@@ -33,6 +33,7 @@ class DescriptorGenerator:
         components: list[DiscoveredComponent],
         relationships: list[DiscoveredRelationship],
         profile: TechnologyProfile | None = None,
+        flows: list[Any] | None = None,
     ) -> dict[str, Any]:
         """Generate Contract B Application Descriptor dictionary.
 
@@ -132,6 +133,29 @@ class DescriptorGenerator:
             "relationships": confirmed_relationships,
             "current_config": current_config,
         }
+
+        # v2 additions - backward-compatible
+        if flows:
+            descriptor["flows"] = [
+                {
+                    "archetype": getattr(f, "archetype", "default"),
+                    "description": getattr(f, "description", ""),
+                    "steps": [
+                        {
+                            "name": getattr(s, "name", ""),
+                            "kind": getattr(s, "kind", ""),
+                            "description": getattr(s, "description", ""),
+                            "is_conditional": getattr(s, "is_conditional", False),
+                        }
+                        for s in getattr(f, "steps", [])
+                    ],
+                }
+                for f in flows
+            ]
+            descriptor["discovery_method"] = "v2_evidence"
+        else:
+            descriptor["flows"] = []
+            descriptor["discovery_method"] = "v1_rules"
 
         logger.info(
             "Contract B descriptor generated for app '%s' with %d components and %d confirmed relationships",

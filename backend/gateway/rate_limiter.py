@@ -67,8 +67,9 @@ class RateLimiter:
       with decode_responses=False.
     """
 
-    def __init__(self, redis_client: redis.Redis) -> None:
+    def __init__(self, redis_client: redis.Redis | None = None) -> None:
         self._r = redis_client
+        self._mem_counts: dict[str, list[float]] = {}
 
     def check(
         self,
@@ -81,30 +82,54 @@ class RateLimiter:
         Raises HTTP 429 if the application has exceeded `limit` requests
         in the last `window_s` seconds.
         """
-        key = _RATE_KEY_PREFIX + app_id
-        now_ms = int(time.time() * 1000)
-        cutoff_ms = now_ms - window_s * 1000
+        if self._r is not None:
+            try:
+                key = _RATE_KEY_PREFIX + app_id
+                now_ms = int(time.time() * 1000)
+                cutoff_ms = now_ms - window_s * 1000
 
-        pipe = self._r.pipeline(transaction=False)
-        pipe.zadd(key, {str(now_ms): now_ms})
-        pipe.zremrangebyscore(key, 0, cutoff_ms)
-        pipe.zcard(key)
-        pipe.expire(key, window_s * 2)
-        results = pipe.execute()
+                pipe = self._r.pipeline(transaction=False)
+                pipe.zadd(key, {str(now_ms): now_ms})
+                pipe.zremrangebyscore(key, 0, cutoff_ms)
+                pipe.zcard(key)
+                pipe.expire(key, window_s * 2)
+                results = pipe.execute()
 
-        count = results[2]  # ZCARD result
-        if count > limit:
-            retry_after = window_s
+                count = results[2]  # ZCARD result
+                if count > limit:
+                    retry_after = window_s
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail={
+                            "code": "RATE_LIMIT_EXCEEDED",
+                            "message": f"Rate limit of {limit} requests per {window_s}s exceeded",
+                            "retry_after_seconds": retry_after,
+                        },
+                        headers={"Retry-After": str(retry_after)},
+                    )
+                logger.debug("Rate check app_id=%s count=%d/%d", app_id, count, limit)
+                return
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.debug("Redis rate check failed (%s), using in-memory rate check", e)
+
+        # In-memory sliding window fallback
+        now_s = time.time()
+        cutoff_s = now_s - window_s
+        history = [t for t in self._mem_counts.get(app_id, []) if t > cutoff_s]
+        history.append(now_s)
+        self._mem_counts[app_id] = history
+        if len(history) > limit:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail={
                     "code": "RATE_LIMIT_EXCEEDED",
-                    "message": f"Rate limit of {limit} requests per {window_s}s exceeded",
-                    "retry_after_seconds": retry_after,
+                    "message": f"Rate limit of {limit} requests per {window_s}s exceeded (memory limiter)",
+                    "retry_after_seconds": window_s,
                 },
-                headers={"Retry-After": str(retry_after)},
+                headers={"Retry-After": str(window_s)},
             )
-        logger.debug("Rate check app_id=%s count=%d/%d", app_id, count, limit)
 
 
 _rate_limiter: RateLimiter | None = None
@@ -113,8 +138,26 @@ _rate_limiter: RateLimiter | None = None
 def get_rate_limiter() -> RateLimiter:
     global _rate_limiter
     if _rate_limiter is None:
-        url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        # decode_responses=False so sorted set scores stay numeric
-        r = redis.Redis.from_url(url, decode_responses=False, socket_connect_timeout=5)
-        _rate_limiter = RateLimiter(r)
+        try:
+            from env_loader import get_redis_url
+            url = get_redis_url()
+        except ImportError:
+            url = os.getenv("REDIS_URL", "").strip()
+            if not (url.startswith("redis://") or url.startswith("rediss://") or url.startswith("unix://")):
+                url = "redis://localhost:6379/0"
+
+        r_client: redis.Redis | None = None
+        try:
+            # decode_responses=False so sorted set scores stay numeric
+            r_client = redis.Redis.from_url(url, decode_responses=False, socket_connect_timeout=3)
+            r_client.ping()
+        except Exception as exc:
+            logger.warning("Could not connect to Redis for RateLimiter at %s (%s). Using local/memory fallback.", url, exc)
+            if "localhost" not in url:
+                try:
+                    r_client = redis.Redis.from_url("redis://localhost:6379/0", decode_responses=False, socket_connect_timeout=2)
+                    r_client.ping()
+                except Exception:
+                    r_client = None
+        _rate_limiter = RateLimiter(r_client)
     return _rate_limiter

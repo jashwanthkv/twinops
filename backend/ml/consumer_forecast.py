@@ -129,17 +129,17 @@ class ForecastConsumer:
                 # Update model: use the current reading as the y_target for the previous window
                 prev_key = f"{app_id}:{metric}"
                 prev_window = self._last_windows.get(prev_key)
-                if prev_window is not None and len(prev_window) >= 10:
-                    pw = np.array(prev_window, dtype=np.float64)
+                if prev_window is not None and len(prev_window) >= 15:
+                    pw = np.array(prev_window[-15:], dtype=np.float64)
                     await asyncio.to_thread(
                         self._forecaster.update, app_id, metric, pw, current_val
                     )
 
-                self._last_windows[prev_key] = window.tolist()
+                self._last_windows[prev_key] = window[-15:].tolist()
 
-                # Predict
+                # Predict using strictly the last 15 values
                 predicted = await asyncio.to_thread(
-                    self._forecaster.predict, app_id, metric, window
+                    self._forecaster.predict, app_id, metric, window[-15:]
                 )
                 if predicted is None:
                     continue

@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-EVALUATOR_MODEL = "llama-3.1-8b-instant"
+EVALUATOR_MODEL = os.getenv("EVALUATOR_MODEL", os.getenv("AIE_GROQ_MODEL", "openai/gpt-oss-120b"))
 _PROMPT_TEMPLATE = """\
 You are the TwinOps Anomaly Evaluator.
 An Isolation Forest detector flagged an alert.

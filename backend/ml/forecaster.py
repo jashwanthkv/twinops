@@ -40,11 +40,12 @@ DRIFT_MAE_RATIO = 3.0  # if MAE > 3x initial MAE → hard drift
 
 
 def _build_X(window: np.ndarray) -> np.ndarray:
-    """Build 13-feature vector from 10-value window + engineered features."""
-    slope_last3 = float(np.polyfit(range(3), window[-3:], 1)[0]) if len(window) >= 3 else 0.0
-    mean10 = float(np.mean(window))
-    std10 = float(np.std(window))
-    return np.concatenate([window, [slope_last3, mean10, std10]])
+    """Build 18-feature vector from strictly the last 15-value window + engineered features."""
+    w = window[-15:] if len(window) >= 15 else window
+    slope_last3 = float(np.polyfit(range(3), w[-3:], 1)[0]) if len(w) >= 3 else 0.0
+    mean15 = float(np.mean(w))
+    std15 = float(np.std(w))
+    return np.concatenate([w, [slope_last3, mean15, std15]])
 
 
 class Forecaster:
@@ -85,15 +86,33 @@ class Forecaster:
         return self._models[key]
 
     def update(self, app_id: str, metric: str, window: np.ndarray, y_target: float) -> None:
-        """Update model weights with one new (X_window → y_target) observation."""
+        """Update model weights with one new (X_window → y_target) observation using last 15 values."""
+        if len(window) < 15:
+            return
+        w = window[-15:]
         model = self._get_model(app_id, metric)
-        X = _build_X(window).reshape(1, -1)
+        X = _build_X(w).reshape(1, -1)
+
+        # Handle dimension migration (e.g. from 13 to 18 features)
+        if hasattr(model, "coef_") and model.coef_.shape[0] != X.shape[1]:
+            logger.info("Resetting SGDRegressor for %s/%s due to feature size change (%d -> %d)",
+                        app_id, metric, model.coef_.shape[0], X.shape[1])
+            model = SGDRegressor(
+                loss="squared_error",
+                learning_rate="adaptive",
+                eta0=0.01,
+                warm_start=True,
+                max_iter=1,
+                tol=None,
+            )
+            self._models[self._key(app_id, metric)] = model
+
         y = np.array([y_target])
 
         # Track prediction error before update (if model is initialized)
         key = self._key(app_id, metric)
         count = self._update_counts.get(key, 0)
-        if count >= 1:
+        if count >= 1 and hasattr(model, "coef_") and model.coef_.shape[0] == X.shape[1]:
             try:
                 pred = model.predict(X)[0]
                 err = abs(pred - y_target)
@@ -112,13 +131,18 @@ class Forecaster:
             self._save(app_id, metric, model, count)
 
     def predict(self, app_id: str, metric: str, window: np.ndarray) -> float | None:
-        """Return predicted value at t+15min, or None if model not initialized."""
+        """Return predicted value at t+15min using strictly the last 15 values, or None if not ready."""
+        if len(window) < 15:
+            return None
+        w = window[-15:]
         key = self._key(app_id, metric)
         model = self._models.get(key)
         if model is None or self._update_counts.get(key, 0) < 2:
             return None
         try:
-            X = _build_X(window).reshape(1, -1)
+            X = _build_X(w).reshape(1, -1)
+            if hasattr(model, "coef_") and model.coef_.shape[0] != X.shape[1]:
+                return None
             return float(model.predict(X)[0])
         except Exception as exc:
             logger.warning("Prediction failed for %s/%s: %s", app_id, metric, exc)

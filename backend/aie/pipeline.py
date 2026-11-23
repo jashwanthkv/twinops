@@ -39,6 +39,7 @@ from aie.models import (
     AnalysisProgress,
     AnalysisRequest,
     AnalysisRun,
+    ComponentType,
     DiscoveredComponent,
     DiscoveredRelationship,
     FileEntry,
@@ -348,22 +349,108 @@ class AIEPipeline:
                 stage_index=6,
             )
 
-            identify_func = self.component_identifier.identify
-            if inspect.iscoroutinefunction(identify_func):
-                components: list[DiscoveredComponent] = await identify_func(
-                    codebase_ir=codebase_ir,
-                    profile=profile,
-                    docs_knowledge=docs_knowledge,
-                    inventory=inventory,
-                )
-            else:
-                components = await asyncio.to_thread(
-                    identify_func,
-                    codebase_ir=codebase_ir,
-                    profile=profile,
-                    docs_knowledge=docs_knowledge,
-                    inventory=inventory,
-                )
+            components: list[DiscoveredComponent] = []
+            self._v2_flows = []
+            v2_success = False
+
+            try:
+                from aie.evidence.models import EvidenceBundle
+                from aie.evidence.manifest_extractor import ManifestExtractor
+                from aie.evidence.infra_extractor import InfraExtractor
+                from aie.evidence.config_extractor import ConfigExtractor
+                from aie.evidence.catalog_resolver import CatalogResolver
+                from aie.components.candidates import form_candidates
+                from aie.components.synthesizer import Synthesizer
+                from aie.components.verifier import Verifier
+                from aie.flows.builder import FlowBuilder
+
+                all_file_paths = [f.file_path for f in codebase_ir.files] if codebase_ir else []
+                repo_root = getattr(workspace, "root_path", "") if workspace else ""
+
+                bundle = EvidenceBundle()
+                if repo_root:
+                    for ev in ManifestExtractor().extract(repo_root, all_file_paths):
+                        bundle.add(ev)
+                    for ev in InfraExtractor().extract(repo_root, all_file_paths):
+                        bundle.add(ev)
+                    for ev in ConfigExtractor().extract(repo_root, all_file_paths):
+                        bundle.add(ev)
+
+                tech_matches = CatalogResolver().resolve(bundle)
+                logger.info("[AIE-v2] Resolved %d tech nodes from %d evidence items", len(tech_matches), len(bundle.items))
+
+                formation = form_candidates(codebase_ir, bundle, tech_matches)
+                logger.info("[AIE-v2] Formed %d candidates, %d tech nodes", len(formation.candidates), len(formation.tech_nodes))
+
+                synthesizer = Synthesizer()
+                synth_components = synthesizer.synthesize(formation.candidates, formation.domain_files)
+
+                ev_ids = {e.id for e in bundle.items}
+                verifier = Verifier()
+                verification = verifier.verify(synth_components, ev_ids)
+                logger.info("[AIE-v2] Verifier: %d accepted, %d rejected", len(verification.accepted), len(verification.rejected))
+
+                flow_builder = FlowBuilder()
+                self._v2_flows = flow_builder.build(codebase_ir, formation.tech_nodes)
+
+                kind_map = {
+                    "auth": ComponentType.AUTHENTICATION,
+                    "rate_limiter": ComponentType.RATE_LIMITER,
+                    "middleware": ComponentType.MIDDLEWARE,
+                    "api_routing": ComponentType.WEB_TIER,
+                    "domain_service": ComponentType.DOMAIN_SERVICE,
+                    "background_worker": ComponentType.BACKGROUND_WORKER,
+                    "database": ComponentType.DATABASE,
+                    "cache": ComponentType.CACHE,
+                    "vector_store": ComponentType.VECTOR_STORE,
+                    "ai_agent": ComponentType.AGENT,
+                }
+
+                for comp_dict in verification.accepted:
+                    kind = comp_dict.get("kind", "unknown")
+                    comp_type = kind_map.get(kind, ComponentType.SERVICE)
+                    dc = DiscoveredComponent(
+                        run_id=run_id,
+                        name=comp_dict.get("name", "Component"),
+                        component_type=comp_type,
+                        description=comp_dict.get("responsibility", ""),
+                        technologies=comp_dict.get("technologies", []),
+                        confidence=float(comp_dict.get("confidence", 0.8)),
+                        root_paths=comp_dict.get("files", [])[:5],
+                        metadata={
+                            "layer": comp_dict.get("layer", "other"),
+                            "kind": kind,
+                            "v2_discovery": True,
+                        },
+                    )
+                    if hasattr(dc, "layer"):
+                        dc.layer = comp_dict.get("layer", "other")
+                    components.append(dc)
+
+                if components:
+                    v2_success = True
+                    logger.info("[AIE-v2] Stage 6 successfully discovered %d components", len(components))
+            except Exception as v2_err:
+                logger.warning("[AIE-v2] Stage 6 v2 discovery failed (%s), falling back to legacy rules", v2_err, exc_info=True)
+                v2_success = False
+
+            if not v2_success or not components:
+                identify_func = self.component_identifier.identify
+                if inspect.iscoroutinefunction(identify_func):
+                    components = await identify_func(
+                        codebase_ir=codebase_ir,
+                        profile=profile,
+                        docs_knowledge=docs_knowledge,
+                        inventory=inventory,
+                    )
+                else:
+                    components = await asyncio.to_thread(
+                        identify_func,
+                        codebase_ir=codebase_ir,
+                        profile=profile,
+                        docs_knowledge=docs_knowledge,
+                        inventory=inventory,
+                    )
 
             for comp in components:
                 comp.run_id = run_id
@@ -522,6 +609,7 @@ class AIEPipeline:
                 components=components,
                 relationships=relationships,
                 profile=profile,
+                flows=getattr(self, "_v2_flows", None),
             )
             if operational_knobs:
                 descriptor["operational_knobs"] = operational_knobs

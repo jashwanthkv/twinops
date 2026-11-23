@@ -28,6 +28,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 
 import motor.motor_asyncio
@@ -62,6 +63,7 @@ class LLMConsumer:
         self.col = self.mongo[_DB_NAME]["analysis_results"]
         self.assembler = ContextAssembler()
         self.analyzer = MasterLLMAnalyzer()
+        self._last_analysis_time: dict[str, float] = {}
 
     async def run(self) -> None:
         logger.info("LLMConsumer started — listening on %s and %s for group '%s'", STREAM_ANOMALY, STREAM_ANALYSIS, _GROUP)
@@ -99,6 +101,12 @@ class LLMConsumer:
     async def _process_anomaly(self, msg_id: str, fields: dict) -> None:
         app_id = fields.get("application_id") or fields.get("app_id", "unknown")
         try:
+            now = time.time()
+            if now - self._last_analysis_time.get(app_id, 0) < 15:
+                logger.debug("Skipping anomaly Master LLM for '%s' (cooldown active)", app_id)
+                return
+            self._last_analysis_time[app_id] = now
+
             logger.info("LLMConsumer triggered by confirmed anomaly on app='%s' (metric: %s)", app_id, fields.get("top_metric"))
             print(f"[Master LLM] 🧠 Triggered by confirmed anomaly on '{app_id}' ({fields.get('top_metric')}). Assembling AIE architecture context...", flush=True)
 
@@ -134,6 +142,12 @@ class LLMConsumer:
     async def _process_forecast(self, msg_id: str, fields: dict) -> None:
         app_id = fields.get("application_id") or fields.get("app_id", "unknown")
         try:
+            now = time.time()
+            if now - self._last_analysis_time.get(app_id, 0) < 15:
+                logger.debug("Skipping forecast Master LLM for '%s' (cooldown active)", app_id)
+                return
+            self._last_analysis_time[app_id] = now
+
             escalations = json.loads(fields.get("escalations", "[]"))
             logger.warning("LLMConsumer triggered by forecast degradation on app='%s' (%d metrics)", app_id, len(escalations))
             print(f"[Master LLM] 🔮 Triggered by forecast degradation on '{app_id}' ({len(escalations)} metrics). Assembling AIE architecture context...", flush=True)
