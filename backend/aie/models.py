@@ -93,6 +93,12 @@ class ComponentType(StrEnum):
     AGENT = "agent"
     ORCHESTRATOR = "orchestrator"
     VECTOR_STORE = "vector_store"
+    AUTHENTICATION = "authentication"
+    AUTHORIZATION = "authorization"
+    RATE_LIMITER = "rate_limiter"
+    MIDDLEWARE = "middleware"
+    DOMAIN_SERVICE = "domain_service"
+    INGRESS = "ingress"
     UNKNOWN = "unknown"
 
 
@@ -326,6 +332,10 @@ class DiscoveredComponent(BaseModel):
     evidence: list[SourceEvidence] = Field(default_factory=list)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     metadata: dict = Field(default_factory=dict)
+    layer: str | None = Field(
+        default=None,
+        description="Architectural layer: edge|security|application|integration|data|messaging|ai|observability|platform|presentation|other",
+    )
 
 
 class DiscoveredRelationship(BaseModel):

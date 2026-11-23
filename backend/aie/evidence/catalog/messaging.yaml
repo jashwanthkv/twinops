@@ -1,0 +1,32 @@
+# Technology catalog: messaging & streaming
+
+technologies:
+  - id: kafka
+    display_name: Apache Kafka
+    layer: messaging
+    possible_roles: [event_stream, message_bus]
+    match:
+      packages: [confluent-kafka, kafka-python, aiokafka, faust-streaming]
+      images: [confluentinc/cp-kafka, bitnami/kafka, apache/kafka]
+      ports: [9092, 9093]
+      env_keys: [KAFKA_BOOTSTRAP_SERVERS, KAFKA_BROKER_URL]
+
+  - id: rabbitmq
+    display_name: RabbitMQ
+    layer: messaging
+    possible_roles: [message_queue, task_broker]
+    match:
+      packages: [pika, aio-pika, kombu]
+      images: [rabbitmq, bitnami/rabbitmq]
+      ports: [5672, 15672]
+      env_keys: [RABBITMQ_URL, AMQP_URL, BROKER_URL]
+
+  - id: redis_streams
+    display_name: Redis Streams
+    layer: messaging
+    possible_roles: [event_stream, job_queue]
+    match:
+      packages: [redis, aioredis]
+      images: [redis]
+      ports: [6379]
+      env_keys: [REDIS_STREAM_KEY, REDIS_STREAM_URL]

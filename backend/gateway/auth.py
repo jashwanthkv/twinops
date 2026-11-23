@@ -98,63 +98,150 @@ class ConnectorRegistry:
       unless you have Redis persistence or a backup.
     """
 
-    def __init__(self, redis_client: redis.Redis) -> None:
+def _clean_redis_url(url: str | None) -> str:
+    """Ensure a valid redis:// URL scheme."""
+    raw = (url or "").strip().strip("\"'").strip()
+    if not raw or raw.startswith("http://") or raw.startswith("https://"):
+        return "redis://localhost:6379/0"
+    if not (raw.startswith("redis://") or raw.startswith("rediss://") or raw.startswith("unix://")):
+        return f"redis://{raw}"
+    return raw
+
+
+class ConnectorRegistry:
+    """CRUD for ConnectorRecord objects stored as Redis hashes with in-memory fallback.
+
+    HOW IT IS CODED:
+      Each connector is stored as a flat Redis hash at
+      gateway:connectors:{app_id}. A secondary index
+      gateway:apikey_index:{sha256(key)} -> app_id allows O(1) lookup.
+      If Redis is unavailable or offline, gracefully falls back to memory.
+    """
+
+    def __init__(self, redis_client: redis.Redis | None = None) -> None:
         self._r = redis_client
+        self._mem_store: dict[str, dict] = {}
+        self._mem_index: dict[str, str] = {}
 
     def register(self, record: ConnectorRecord, raw_api_key: str) -> None:
         """Store the connector record and build the lookup index."""
         key = _CONNECTOR_KEY.format(app_id=record.application_id)
         data = record.model_dump(mode="json")
-        # Store tags as JSON string in the hash
         data["tags"] = json.dumps(data.get("tags", {}))
         data["registered_at"] = record.registered_at.isoformat()
         data["last_seen_at"] = record.last_seen_at.isoformat() if record.last_seen_at else ""
         data["is_active"] = "1" if record.is_active else "0"
-        self._r.hset(key, mapping={str(k): str(v) for k, v in data.items()})
 
-        # Secondary index: sha256(key) → app_id
-        idx_key = _API_KEY_INDEX.format(key_hash=_hash_key(raw_api_key))
-        self._r.set(idx_key, record.application_id)
+        # In-memory store
+        self._mem_store[record.application_id] = data
+        key_hash = _hash_key(raw_api_key)
+        self._mem_index[key_hash] = record.application_id
+
+        # Redis store
+        if self._r is not None:
+            try:
+                self._r.hset(key, mapping={str(k): str(v) for k, v in data.items()})
+                idx_key = _API_KEY_INDEX.format(key_hash=key_hash)
+                self._r.set(idx_key, record.application_id)
+            except Exception as e:
+                logger.warning("Redis write failed for connector '%s', stored in memory: %s", record.application_id, e)
+
         logger.info("Registered connector app_id=%s connector_id=%s", record.application_id, record.connector_id)
 
     def get_by_app_id(self, app_id: str) -> ConnectorRecord | None:
         """Fetch connector record by application_id."""
-        key = _CONNECTOR_KEY.format(app_id=app_id)
-        data = self._r.hgetall(key)
-        if not data:
-            return None
-        return self._parse_record(data)
+        if self._r is not None:
+            try:
+                key = _CONNECTOR_KEY.format(app_id=app_id)
+                data = self._r.hgetall(key)
+                if data:
+                    return self._parse_record(data)
+            except Exception as e:
+                logger.debug("Redis read failed for app_id '%s': %s", app_id, e)
+
+        # Fallback to in-memory
+        mem_data = self._mem_store.get(app_id)
+        if mem_data:
+            return self._parse_record(mem_data)
+        return None
 
     def get_app_id_for_key(self, raw_key: str) -> str | None:
         """Look up which application_id owns this raw API key."""
-        idx_key = _API_KEY_INDEX.format(key_hash=_hash_key(raw_key))
-        return self._r.get(idx_key)
+        key_hash = _hash_key(raw_key)
+        if self._r is not None:
+            try:
+                idx_key = _API_KEY_INDEX.format(key_hash=key_hash)
+                app_id = self._r.get(idx_key)
+                if app_id:
+                    return app_id
+            except Exception as e:
+                logger.debug("Redis lookup failed for key hash: %s", e)
+
+        # Fallback to in-memory
+        return self._mem_index.get(key_hash)
 
     def touch_last_seen(self, app_id: str) -> None:
         """Update last_seen_at timestamp (called on every authenticated request)."""
-        key = _CONNECTOR_KEY.format(app_id=app_id)
-        self._r.hset(key, "last_seen_at", datetime.now(tz=timezone.utc).isoformat())
+        now_str = datetime.now(tz=timezone.utc).isoformat()
+        if app_id in self._mem_store:
+            self._mem_store[app_id]["last_seen_at"] = now_str
+        if self._r is not None:
+            try:
+                key = _CONNECTOR_KEY.format(app_id=app_id)
+                self._r.hset(key, "last_seen_at", now_str)
+            except Exception:
+                pass
 
     def exists(self, app_id: str) -> bool:
-        return bool(self._r.exists(_CONNECTOR_KEY.format(app_id=app_id)))
+        if app_id in self._mem_store:
+            return True
+        if self._r is not None:
+            try:
+                return bool(self._r.exists(_CONNECTOR_KEY.format(app_id=app_id)))
+            except Exception:
+                pass
+        return False
 
     def set_active(self, app_id: str, active: bool) -> None:
-        key = _CONNECTOR_KEY.format(app_id=app_id)
-        self._r.hset(key, "is_active", "1" if active else "0")
+        val_str = "1" if active else "0"
+        if app_id in self._mem_store:
+            self._mem_store[app_id]["is_active"] = val_str
+        if self._r is not None:
+            try:
+                key = _CONNECTOR_KEY.format(app_id=app_id)
+                self._r.hset(key, "is_active", val_str)
+            except Exception:
+                pass
 
     def list_connectors(self) -> list[str]:
         """Return all registered application_ids."""
-        pattern = _CONNECTOR_KEY.format(app_id="*")
-        return [k.split(":")[-1] for k in self._r.keys(pattern)]
+        app_ids = set(self._mem_store.keys())
+        if self._r is not None:
+            try:
+                pattern = _CONNECTOR_KEY.format(app_id="*")
+                redis_apps = [k.split(":")[-1] for k in self._r.keys(pattern)]
+                app_ids.update(redis_apps)
+            except Exception:
+                pass
+        return sorted(list(app_ids))
 
     def _parse_record(self, data: dict) -> ConnectorRecord:
+        tags_raw = data.get("tags", "{}")
+        if isinstance(tags_raw, dict):
+            tags_dict = tags_raw
+        else:
+            try:
+                tags_dict = json.loads(tags_raw)
+            except Exception:
+                tags_dict = {}
+
         return ConnectorRecord(
             connector_id=data.get("connector_id", ""),
             application_id=data.get("application_id", ""),
             display_name=data.get("display_name", ""),
             environment=data.get("environment", "production"),
             owner_email=data.get("owner_email") or None,
-            tags=json.loads(data.get("tags", "{}")),
+            tags=tags_dict,
             tenant_id=data.get("tenant_id", "default"),
             api_key_hash=data.get("api_key_hash", ""),
             registered_at=datetime.fromisoformat(data["registered_at"]) if data.get("registered_at") else datetime.now(tz=timezone.utc),
@@ -183,9 +270,25 @@ _registry: ConnectorRegistry | None = None
 def get_registry() -> ConnectorRegistry:
     global _registry
     if _registry is None:
-        url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        r = redis.Redis.from_url(url, decode_responses=True, socket_connect_timeout=5)
-        _registry = ConnectorRegistry(r)
+        try:
+            from env_loader import get_redis_url
+            url = get_redis_url()
+        except ImportError:
+            url = _clean_redis_url(os.getenv("REDIS_URL"))
+        r_client: redis.Redis | None = None
+        try:
+            r_client = redis.Redis.from_url(url, decode_responses=True, socket_connect_timeout=3)
+            r_client.ping()
+        except Exception as exc:
+            logger.warning("Could not connect to Redis at %s (%s). Falling back to in-memory connector registry.", url, exc)
+            # Try default localhost if url was customized and failed
+            if "localhost" not in url:
+                try:
+                    r_client = redis.Redis.from_url("redis://localhost:6379/0", decode_responses=True, socket_connect_timeout=2)
+                    r_client.ping()
+                except Exception:
+                    r_client = None
+        _registry = ConnectorRegistry(r_client)
     return _registry
 
 

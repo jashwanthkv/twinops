@@ -1,0 +1,62 @@
+# Technology catalog: web frameworks
+
+technologies:
+  - id: fastapi
+    display_name: FastAPI
+    layer: application
+    possible_roles: [api_routing, web_server, middleware_host]
+    match:
+      packages: [fastapi, uvicorn, starlette]
+      images: []
+      ports: [8000, 8080, 8001]
+      env_keys: [APP_PORT, API_PORT]
+
+  - id: flask
+    display_name: Flask
+    layer: application
+    possible_roles: [api_routing, web_server]
+    match:
+      packages: [flask, flask-restful, flask-restx, werkzeug]
+      images: []
+      ports: [5000, 5001]
+      env_keys: [FLASK_PORT, PORT]
+
+  - id: django
+    display_name: Django
+    layer: application
+    possible_roles: [api_routing, web_server, orm]
+    match:
+      packages: [django, djangorestframework, django-rest-framework]
+      images: []
+      ports: [8000]
+      env_keys: [DJANGO_SETTINGS_MODULE, SECRET_KEY]
+
+  - id: celery
+    display_name: Celery
+    layer: messaging
+    possible_roles: [task_queue, background_worker]
+    match:
+      packages: [celery, celery-beat, flower]
+      images: [celery]
+      ports: []
+      env_keys: [CELERY_BROKER_URL, BROKER_URL, CELERY_RESULT_BACKEND]
+
+  - id: slowapi
+    display_name: SlowAPI Rate Limiter
+    layer: security
+    possible_roles: [rate_limiter]
+    match:
+      packages: [slowapi, limits]
+      images: []
+      ports: []
+      env_keys: [RATE_LIMIT, RATELIMIT_DEFAULT]
+
+  - id: limits
+    display_name: Rate Limiting
+    layer: security
+    possible_roles: [rate_limiter]
+    match:
+      packages: [limits, ratelimit, flask-limiter, fastapi-limiter]
+      images: []
+      ports: []
+      env_keys: [RATE_LIMIT_PER_MINUTE, DEFAULT_RATE_LIMIT]

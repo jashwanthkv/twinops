@@ -81,14 +81,21 @@ class AnomalyConsumer:
             # Update rolling stats (Welford online)
             mean, std, count = update_stats(self._r, app_id, features)
 
-            # Also push forecast metrics into rolling window
+            # Also push forecast metrics into rolling window (buffers all incoming data)
             metric_lookup = {m.get("name"): m.get("value") for m in metrics_raw if m.get("name")}
             ts = time.time()
             for fm in FORECAST_METRICS:
                 if fm in metric_lookup and metric_lookup[fm] is not None:
                     push_metric(self._r, app_id, fm, float(metric_lookup[fm]), ts)
 
-            # Anomaly inference
+            # Wait until 15 data points arrive before running ML / LLM
+            if count < 15:
+                self._detector.add_sample(app_id, features)
+                print(f"[ML Engine] ⏳ Buffering telemetry ({count}/15 data points) for '{app_id}' — awaiting 15 points before running ML/LLM", flush=True)
+                self._bus.ack(STREAM_TELEMETRY, _GROUP, msg_id)
+                return
+
+            # Anomaly inference using strictly the last 15 data points
             result = self._detector.predict(app_id, features, mean, std)
 
             if not result.alert:

@@ -36,9 +36,9 @@ from ml.feature_extractor import FEATURE_NAMES, top_deviated_metric
 
 logger = logging.getLogger(__name__)
 
-MIN_TRAIN = 50           # min observations before first training
-RETRAIN_AFTER = 200      # retrain every N new observations
-TRAIN_BUFFER_SIZE = 500  # keep last N samples for retraining
+MIN_TRAIN = 15           # min observations before first training (strictly last 15 used)
+RETRAIN_AFTER = 1        # keep model aligned with the last 15 points
+TRAIN_BUFFER_SIZE = 500  # keep buffer of incoming samples in Redis
 ANOMALY_THRESHOLD = float(os.getenv("ANOMALY_THRESHOLD", "0.0"))  # IF score threshold (negative = anomalous)
 CONTAMINATION = float(os.getenv("IF_CONTAMINATION", "0.05"))
 
@@ -52,7 +52,7 @@ class AnomalyResult:
 
 
 class AnomalyDetector:
-    """Per-app_id Isolation Forest anomaly detector."""
+    """Per-app_id Isolation Forest anomaly detector trained on strictly the last 15 data points."""
 
     def __init__(self, r: redis.Redis) -> None:
         self._r = r
@@ -61,6 +61,12 @@ class AnomalyDetector:
 
     def _train_key(self, app_id: str) -> str:
         return f"ml:train:{app_id}"
+
+    def add_sample(self, app_id: str, features: np.ndarray) -> int:
+        """Store an incoming sample into Redis buffer without running inference."""
+        count = self._add_sample(app_id, features)
+        self._counts[app_id] = count
+        return count
 
     def _add_sample(self, app_id: str, features: np.ndarray) -> int:
         key = self._train_key(app_id)
@@ -72,7 +78,8 @@ class AnomalyDetector:
 
     def _load_training_data(self, app_id: str) -> np.ndarray | None:
         key = self._train_key(app_id)
-        raw = self._r.zrange(key, 0, -1)
+        # Fetch strictly the last MIN_TRAIN (15) samples
+        raw = self._r.zrange(key, -MIN_TRAIN, -1)
         if not raw:
             return None
         rows = []
@@ -83,22 +90,24 @@ class AnomalyDetector:
                 continue
         if len(rows) < MIN_TRAIN:
             return None
-        return np.array(rows, dtype=np.float64)
+        return np.array(rows[-MIN_TRAIN:], dtype=np.float64)
 
     def _retrain(self, app_id: str) -> None:
         X = self._load_training_data(app_id)
         if X is None:
-            logger.debug("Not enough data to train anomaly model for %s", app_id)
+            logger.debug("Not enough data to train anomaly model for %s (need %d points)", app_id, MIN_TRAIN)
             return
+        n_samples = len(X)
         model = IsolationForest(
-            n_estimators=100,
+            n_estimators=50,
             contamination=CONTAMINATION,
+            max_samples=min(15, n_samples),
             random_state=42,
             n_jobs=-1,
         )
         model.fit(X)
         self._models[app_id] = model
-        logger.info("Anomaly model retrained for %s with %d samples", app_id, len(X))
+        logger.info("Anomaly model trained for %s using strictly the last %d samples", app_id, n_samples)
 
     def predict(
         self,
@@ -109,14 +118,16 @@ class AnomalyDetector:
     ) -> AnomalyResult:
         count = self._add_sample(app_id, features)
         self._counts[app_id] = count
-
-        # Trigger retrain on first MIN_TRAIN, then every RETRAIN_AFTER
-        if count == MIN_TRAIN or (count > MIN_TRAIN and count % RETRAIN_AFTER == 0):
-            self._retrain(app_id)
-
         ts = datetime.now(tz=timezone.utc).isoformat()
-        model = self._models.get(app_id)
 
+        # If fewer than 15 data points, wait — no ML or LLM should work until 15 points arrive
+        if count < MIN_TRAIN:
+            return AnomalyResult(timestamp=ts, score=0.0, alert=False, top_metric="")
+
+        # Once count >= 15, retrain/update model using strictly the last 15 data points
+        self._retrain(app_id)
+
+        model = self._models.get(app_id)
         if model is None:
             # Not enough data yet — no alert
             return AnomalyResult(timestamp=ts, score=0.0, alert=False, top_metric="")

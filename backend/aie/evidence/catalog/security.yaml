@@ -1,0 +1,52 @@
+# Technology catalog: security & auth
+
+technologies:
+  - id: jwt
+    display_name: JWT Authentication
+    layer: security
+    possible_roles: [authentication, token_validation]
+    match:
+      packages: [python-jose, jose, pyjwt, PyJWT, authlib]
+      images: []
+      ports: []
+      env_keys: [SECRET_KEY, JWT_SECRET, ACCESS_TOKEN_SECRET, JWT_ALGORITHM]
+
+  - id: oauth2
+    display_name: OAuth2
+    layer: security
+    possible_roles: [authentication, authorization]
+    match:
+      packages: [authlib, python-social-auth, social-auth-core, oauthlib, httpx-oauth]
+      images: [keycloak, bitnami/keycloak]
+      ports: [8080]
+      env_keys: [OAUTH2_CLIENT_ID, OAUTH2_CLIENT_SECRET, AUTH_PROVIDER_URL]
+
+  - id: bcrypt
+    display_name: Password Hashing
+    layer: security
+    possible_roles: [credential_management]
+    match:
+      packages: [bcrypt, passlib, argon2-cffi, argon2]
+      images: []
+      ports: []
+      env_keys: []
+
+  - id: casbin
+    display_name: Casbin RBAC
+    layer: security
+    possible_roles: [authorization, rbac]
+    match:
+      packages: [casbin, pycasbin]
+      images: []
+      ports: []
+      env_keys: [CASBIN_MODEL_PATH]
+
+  - id: fastapi_auth
+    display_name: FastAPI Security
+    layer: security
+    possible_roles: [authentication, authorization]
+    match:
+      packages: [fastapi-users, fastapi-jwt-auth, fastapi-security, fastapi-login]
+      images: []
+      ports: []
+      env_keys: []

@@ -34,7 +34,7 @@ FORECAST_METRICS: list[str] = [
     "response_time_p95_ms", "db_pool_pending", "worker_queue_depth",
 ]
 WINDOW_SECONDS = 600   # 10 minutes
-MIN_WINDOW_SIZE = 10   # need at least 10 readings to forecast
+MIN_WINDOW_SIZE = 15   # need at least 15 readings to run ML/LLM (strictly last 15 used)
 
 
 def _window_key(app_id: str, metric: str) -> str:
@@ -42,20 +42,19 @@ def _window_key(app_id: str, metric: str) -> str:
 
 
 def push_metric(r: redis.Redis, app_id: str, metric: str, value: float, ts: float | None = None) -> None:
-    """Add a new observation to the sliding window and trim old entries."""
+    """Add a new observation to the sliding window, storing all incoming data."""
     ts = ts or time.time()
     key = _window_key(app_id, metric)
     member = json.dumps({"ts": ts, "value": value})
     r.zadd(key, {member: ts})
-    # Trim entries older than WINDOW_SECONDS
-    r.zremrangebyscore(key, "-inf", ts - WINDOW_SECONDS)
+    # Buffer up to 500 samples so incoming data is always retained
+    r.zremrangebyrank(key, 0, -501)
 
 
 def get_window(r: redis.Redis, app_id: str, metric: str) -> list[tuple[float, float]]:
     """Return (ts, value) pairs in ascending time order for the window."""
     key = _window_key(app_id, metric)
-    now = time.time()
-    raw = r.zrangebyscore(key, now - WINDOW_SECONDS, "+inf")
+    raw = r.zrange(key, 0, -1)
     result = []
     for item in raw:
         try:
@@ -67,9 +66,10 @@ def get_window(r: redis.Redis, app_id: str, metric: str) -> list[tuple[float, fl
 
 
 def get_window_values(r: redis.Redis, app_id: str, metric: str) -> np.ndarray | None:
-    """Return numpy array of the last 10 values, or None if window not full."""
+    """Return numpy array of strictly the last 15 values, or None if fewer than 15 readings exist."""
     pairs = get_window(r, app_id, metric)
     if len(pairs) < MIN_WINDOW_SIZE:
         return None
+    # Strictly return the last 15 values
     values = np.array([v for _, v in pairs[-MIN_WINDOW_SIZE:]], dtype=np.float64)
     return values

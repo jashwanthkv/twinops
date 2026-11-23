@@ -39,6 +39,7 @@ from aie.models import (
     AnalysisProgress,
     AnalysisRequest,
     AnalysisRun,
+    ComponentType,
     DiscoveredComponent,
     DiscoveredRelationship,
     FileEntry,
@@ -348,22 +349,91 @@ class AIEPipeline:
                 stage_index=6,
             )
 
-            identify_func = self.component_identifier.identify
-            if inspect.iscoroutinefunction(identify_func):
-                components: list[DiscoveredComponent] = await identify_func(
-                    codebase_ir=codebase_ir,
-                    profile=profile,
-                    docs_knowledge=docs_knowledge,
-                    inventory=inventory,
+            components: list[DiscoveredComponent] = []
+            self._v2_flows = []
+
+            # ── Strategy: LLM-first grouping ──────────────────────────────
+            # Pass all file paths + symbols to LLM in one call.
+            # LLM decides component boundaries (no hard-coded rules).
+            # Falls back to legacy rule engine if LLM unavailable/fails.
+            # ──────────────────────────────────────────────────────────────
+            kind_map = {
+                "auth": ComponentType.AUTHENTICATION,
+                "rate_limiter": ComponentType.RATE_LIMITER,
+                "middleware": ComponentType.MIDDLEWARE,
+                "api_routing": ComponentType.WEB_TIER,
+                "domain_service": ComponentType.DOMAIN_SERVICE,
+                "background_worker": ComponentType.BACKGROUND_WORKER,
+                "database": ComponentType.DATABASE,
+                "cache": ComponentType.CACHE,
+                "vector_store": ComponentType.VECTOR_STORE,
+                "ai_agent": ComponentType.AGENT,
+                "message_queue": ComponentType.MESSAGE_QUEUE,
+                "frontend": ComponentType.FRONTEND,
+                "ingress": ComponentType.INGRESS,
+            }
+
+            llm_groups: list[dict] | None = None
+            try:
+                from aie.components.llm_grouper import group_by_llm
+                llm_groups = await asyncio.to_thread(
+                    group_by_llm,
+                    codebase_ir,
+                    profile,
                 )
+            except Exception as llm_err:
+                logger.warning("[LLMGrouper] LLM grouping raised exception: %s", llm_err, exc_info=True)
+
+            if llm_groups:
+                logger.info("[LLMGrouper] LLM discovered %d component groups", len(llm_groups))
+                for grp in llm_groups:
+                    kind = grp.get("kind", "unknown")
+                    comp_type = kind_map.get(kind, ComponentType.SERVICE)
+                    responsibility = grp.get("responsibility", "")
+                    technologies = grp.get("technologies", [])
+                    files = grp.get("files", [])
+                    layer = grp.get("layer", "other")
+
+                    dc = DiscoveredComponent(
+                        run_id=run_id,
+                        name=grp.get("name", "Component"),
+                        component_type=comp_type,
+                        description=responsibility,
+                        technologies=technologies,
+                        confidence=float(grp.get("confidence", 0.8)),
+                        root_paths=files[:5],
+                        layer=layer,
+                        metadata={
+                            "layer": layer,
+                            "kind": kind,
+                            "llm_grouped": True,
+                            "what_it_is_doing": responsibility,
+                            "how_it_is_coded": (
+                                f"Built with {', '.join(technologies)}" if technologies else ""
+                            ),
+                        },
+                    )
+                    components.append(dc)
             else:
-                components = await asyncio.to_thread(
-                    identify_func,
-                    codebase_ir=codebase_ir,
-                    profile=profile,
-                    docs_knowledge=docs_knowledge,
-                    inventory=inventory,
-                )
+                # ── Fallback: legacy AST rule engine ──────────────────────
+                logger.info("[LLMGrouper] LLM unavailable — running legacy rule engine")
+                identify_func = self.component_identifier.identify
+                if inspect.iscoroutinefunction(identify_func):
+                    components = await identify_func(
+                        codebase_ir=codebase_ir,
+                        profile=profile,
+                        docs_knowledge=docs_knowledge,
+                        inventory=inventory,
+                    )
+                else:
+                    components = await asyncio.to_thread(
+                        identify_func,
+                        codebase_ir=codebase_ir,
+                        profile=profile,
+                        docs_knowledge=docs_knowledge,
+                        inventory=inventory,
+                    )
+                logger.info("[RuleEngine] Rule engine found %d components", len(components))
 
             for comp in components:
                 comp.run_id = run_id
@@ -522,6 +592,7 @@ class AIEPipeline:
                 components=components,
                 relationships=relationships,
                 profile=profile,
+                flows=getattr(self, "_v2_flows", None),
             )
             if operational_knobs:
                 descriptor["operational_knobs"] = operational_knobs

@@ -13,6 +13,16 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load backend/.env immediately into os.environ
+_env_path = Path(__file__).resolve().parent / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path, override=False)
+else:
+    load_dotenv(override=False)
+
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, AsyncIterator
