@@ -351,90 +351,72 @@ class AIEPipeline:
 
             components: list[DiscoveredComponent] = []
             self._v2_flows = []
-            v2_success = False
 
+            # ── Strategy: LLM-first grouping ──────────────────────────────
+            # Pass all file paths + symbols to LLM in one call.
+            # LLM decides component boundaries (no hard-coded rules).
+            # Falls back to legacy rule engine if LLM unavailable/fails.
+            # ──────────────────────────────────────────────────────────────
+            kind_map = {
+                "auth": ComponentType.AUTHENTICATION,
+                "rate_limiter": ComponentType.RATE_LIMITER,
+                "middleware": ComponentType.MIDDLEWARE,
+                "api_routing": ComponentType.WEB_TIER,
+                "domain_service": ComponentType.DOMAIN_SERVICE,
+                "background_worker": ComponentType.BACKGROUND_WORKER,
+                "database": ComponentType.DATABASE,
+                "cache": ComponentType.CACHE,
+                "vector_store": ComponentType.VECTOR_STORE,
+                "ai_agent": ComponentType.AGENT,
+                "message_queue": ComponentType.MESSAGE_QUEUE,
+                "frontend": ComponentType.FRONTEND,
+                "ingress": ComponentType.INGRESS,
+            }
+
+            llm_groups: list[dict] | None = None
             try:
-                from aie.evidence.models import EvidenceBundle
-                from aie.evidence.manifest_extractor import ManifestExtractor
-                from aie.evidence.infra_extractor import InfraExtractor
-                from aie.evidence.config_extractor import ConfigExtractor
-                from aie.evidence.catalog_resolver import CatalogResolver
-                from aie.components.candidates import form_candidates
-                from aie.components.synthesizer import Synthesizer
-                from aie.components.verifier import Verifier
-                from aie.flows.builder import FlowBuilder
+                from aie.components.llm_grouper import group_by_llm
+                llm_groups = await asyncio.to_thread(
+                    group_by_llm,
+                    codebase_ir,
+                    profile,
+                )
+            except Exception as llm_err:
+                logger.warning("[LLMGrouper] LLM grouping raised exception: %s", llm_err, exc_info=True)
 
-                all_file_paths = [f.file_path for f in codebase_ir.files] if codebase_ir else []
-                repo_root = getattr(workspace, "root_path", "") if workspace else ""
-
-                bundle = EvidenceBundle()
-                if repo_root:
-                    for ev in ManifestExtractor().extract(repo_root, all_file_paths):
-                        bundle.add(ev)
-                    for ev in InfraExtractor().extract(repo_root, all_file_paths):
-                        bundle.add(ev)
-                    for ev in ConfigExtractor().extract(repo_root, all_file_paths):
-                        bundle.add(ev)
-
-                tech_matches = CatalogResolver().resolve(bundle)
-                logger.info("[AIE-v2] Resolved %d tech nodes from %d evidence items", len(tech_matches), len(bundle.items))
-
-                formation = form_candidates(codebase_ir, bundle, tech_matches)
-                logger.info("[AIE-v2] Formed %d candidates, %d tech nodes", len(formation.candidates), len(formation.tech_nodes))
-
-                synthesizer = Synthesizer()
-                synth_components = synthesizer.synthesize(formation.candidates, formation.domain_files)
-
-                ev_ids = {e.id for e in bundle.items}
-                verifier = Verifier()
-                verification = verifier.verify(synth_components, ev_ids)
-                logger.info("[AIE-v2] Verifier: %d accepted, %d rejected", len(verification.accepted), len(verification.rejected))
-
-                flow_builder = FlowBuilder()
-                self._v2_flows = flow_builder.build(codebase_ir, formation.tech_nodes)
-
-                kind_map = {
-                    "auth": ComponentType.AUTHENTICATION,
-                    "rate_limiter": ComponentType.RATE_LIMITER,
-                    "middleware": ComponentType.MIDDLEWARE,
-                    "api_routing": ComponentType.WEB_TIER,
-                    "domain_service": ComponentType.DOMAIN_SERVICE,
-                    "background_worker": ComponentType.BACKGROUND_WORKER,
-                    "database": ComponentType.DATABASE,
-                    "cache": ComponentType.CACHE,
-                    "vector_store": ComponentType.VECTOR_STORE,
-                    "ai_agent": ComponentType.AGENT,
-                }
-
-                for comp_dict in verification.accepted:
-                    kind = comp_dict.get("kind", "unknown")
+            if llm_groups:
+                logger.info("[LLMGrouper] LLM discovered %d component groups", len(llm_groups))
+                for grp in llm_groups:
+                    kind = grp.get("kind", "unknown")
                     comp_type = kind_map.get(kind, ComponentType.SERVICE)
+                    responsibility = grp.get("responsibility", "")
+                    technologies = grp.get("technologies", [])
+                    files = grp.get("files", [])
+                    layer = grp.get("layer", "other")
+
                     dc = DiscoveredComponent(
                         run_id=run_id,
-                        name=comp_dict.get("name", "Component"),
+                        name=grp.get("name", "Component"),
                         component_type=comp_type,
-                        description=comp_dict.get("responsibility", ""),
-                        technologies=comp_dict.get("technologies", []),
-                        confidence=float(comp_dict.get("confidence", 0.8)),
-                        root_paths=comp_dict.get("files", [])[:5],
+                        description=responsibility,
+                        technologies=technologies,
+                        confidence=float(grp.get("confidence", 0.8)),
+                        root_paths=files[:5],
+                        layer=layer,
                         metadata={
-                            "layer": comp_dict.get("layer", "other"),
+                            "layer": layer,
                             "kind": kind,
-                            "v2_discovery": True,
+                            "llm_grouped": True,
+                            "what_it_is_doing": responsibility,
+                            "how_it_is_coded": (
+                                f"Built with {', '.join(technologies)}" if technologies else ""
+                            ),
                         },
                     )
-                    if hasattr(dc, "layer"):
-                        dc.layer = comp_dict.get("layer", "other")
                     components.append(dc)
-
-                if components:
-                    v2_success = True
-                    logger.info("[AIE-v2] Stage 6 successfully discovered %d components", len(components))
-            except Exception as v2_err:
-                logger.warning("[AIE-v2] Stage 6 v2 discovery failed (%s), falling back to legacy rules", v2_err, exc_info=True)
-                v2_success = False
-
-            if not v2_success or not components:
+            else:
+                # ── Fallback: legacy AST rule engine ──────────────────────
+                logger.info("[LLMGrouper] LLM unavailable — running legacy rule engine")
                 identify_func = self.component_identifier.identify
                 if inspect.iscoroutinefunction(identify_func):
                     components = await identify_func(
@@ -451,6 +433,7 @@ class AIEPipeline:
                         docs_knowledge=docs_knowledge,
                         inventory=inventory,
                     )
+                logger.info("[RuleEngine] Rule engine found %d components", len(components))
 
             for comp in components:
                 comp.run_id = run_id
